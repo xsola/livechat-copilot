@@ -1,0 +1,123 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { alignTranslations, createTasks } from '../../src/models/tasks';
+import { generateDraft } from '../../src/agent/tasks/draft';
+import { defaults, parseEndpoint, parseRegistry } from '../../src/platform/config';
+import { parseCommand } from '../../src/platform/messages';
+import { decideRule, resolveRules, stageRules } from '../../src/rules/resolver';
+import { ruleIndex, type ChatRule } from '../../src/rules/schema';
+import { updateUsage } from '../../src/usage/usage';
+import { Scheduler } from '../../src/translation/scheduler';
+
+const seed: ChatRule = {
+  schemaVersion: 1, id: 'chat', version: 1, host: 'www.youtube.com',
+  framePathPrefix: '/live_chat', container: '#chat', message: '.row', body: '.text',
+};
+const state = { active: [seed], staged: [], rejected: {} };
+const page = new URL('https://www.youtube.com/watch?v=fixture');
+const frame = new URL('https://www.youtube.com/live_chat?v=fixture');
+
+test('local rules outrank staged, active and bundled rules', () => {
+  const second = { ...seed, version: 2, body: '.new-body' };
+  const staged = stageRules(state, [second]);
+  const local = { ...seed, id: 'personal' };
+  assert.deepEqual(resolveRules(page, frame, [local], staged).map(result => result.rule.id),
+    ['personal', 'chat', 'chat', 'youtube-live']);
+  assert.equal(resolveRules(page, new URL('https://example.net/live_chat'), [local], staged).length, 0);
+});
+
+test('failed community candidate rolls back and is not downloaded as pending again', () => {
+  const second = { ...seed, version: 2 };
+  const third = { ...seed, version: 3 };
+  const rejected = decideRule(stageRules(state, [second]), seed.id, 2, false);
+  assert.deepEqual(rejected.active, [seed]);
+  assert.deepEqual(stageRules(rejected, [second]).staged, []);
+  assert.deepEqual(decideRule(stageRules(rejected, [third]), seed.id, 3, true).active, [third]);
+});
+
+test('remote rules and messages are bounded and declarative', () => {
+  assert.equal(ruleIndex.safeParse({ schemaVersion: 1, rules: [seed, seed] }).success, false);
+  assert.equal(ruleIndex.safeParse({ schemaVersion: 1, rules: [{ ...seed, script: 'invalid' }] }).success, false);
+  assert.equal(parseCommand({ kind: 'translate', payload: { revision: 0, items: [{ id: 'item', text: 'x'.repeat(601) }] } }), undefined);
+  assert.equal(parseCommand({ kind: 'toString' }), undefined);
+});
+
+test('model and registry URLs keep credentials out of arbitrary HTTP or redirected origins', () => {
+  for (const url of ['file:///tmp/key', 'https://test:pass@example.org', 'http://example.org', 'https://example.org/?secret=1']) {
+    assert.throws(() => parseEndpoint(url));
+  }
+  assert.equal(parseEndpoint('http://127.0.0.1:9000/v1').pathname, '/v1');
+  assert.throws(() => parseRegistry('https://github.com/example/rules/blob/main/rules/index.json'));
+  assert.equal(parseRegistry('https://raw.githubusercontent.com/example/rules/main/rules/index.json').hostname, 'raw.githubusercontent.com');
+});
+
+test('structured results use IDs, reject unknown and duplicate IDs, and allow partial batches', () => {
+  const input = [{ id: 'a', text: 'one' }, { id: 'b', text: 'two' }];
+  const format = (...ids: string[]) => ({ translations: ids.map(id => ({ id, text: id + '译文' })) });
+  assert.deepEqual(alignTranslations(input, format('b', 'a')).map(item => item.id), ['a', 'b']);
+  assert.deepEqual(alignTranslations(input, format('b')).map(item => item.id), ['b']);
+  assert.throws(() => alignTranslations(input, format('a', 'a')));
+  assert.throws(() => alignTranslations(input, format('z')));
+});
+
+test('provider retries empty output once and records tokens for both attempts', async () => {
+  const events: Array<{ success: boolean; inputTokens: number }> = [];
+  const bodies: object[] = [];
+  const request: typeof fetch = async (url, options) => {
+    assert.equal(url, 'https://api.deepseek.com/chat/completions');
+    assert.equal(options?.redirect, 'error');
+    bodies.push(JSON.parse(String(options?.body)));
+    const content = bodies.length === 1 ? ' ' : '{"translations":[{"id":"a","text":"好的"}]}';
+    return Response.json({ choices: [{ message: { content } }], usage: { prompt_tokens: 42 } });
+  };
+  const tasks = createTasks(async (_task, success, _elapsed, usage) => { events.push({ success, ...usage }); }, request);
+  assert.deepEqual(await tasks.translate(defaults, [{ id: 'a', text: 'OK' }]), [{ id: 'a', text: '好的' }]);
+  assert.deepEqual(events.map(event => [event.success, event.inputTokens]), [[false, 42], [true, 42]]);
+});
+
+test('scheduler invalidates stale results and reuses identical text within a batch and in its cache', async () => {
+  const calls: Array<Array<{ id: string; text: string }>> = [];
+  const received: string[] = [];
+  const counted: string[] = [];
+  let release!: () => void;
+  const started = new Promise<void>(resolve => { release = resolve; });
+  let finish!: () => void;
+  const input = new Promise<void>(resolve => { finish = resolve; });
+  const scheduler = new Scheduler(async items => {
+    calls.push(items);
+    release();
+    await input;
+    return items.map(item => ({ ...item, text: '中文' }));
+  }, 'batch', kind => counted.push(kind), assert.fail);
+  const job = (id: string, available = () => true) => ({
+    id, text: 'same', available, visible: () => true, accept: () => received.push(id),
+  });
+  let valid = true;
+  scheduler.add(job('a', () => valid));
+  scheduler.add(job('b'));
+  await started;
+  valid = false;
+  finish();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  scheduler.add(job('c'));
+  scheduler.close();
+  assert.deepEqual(calls, [[{ id: 'a', text: 'same' }]]);
+  assert.deepEqual(received, ['b', 'c']);
+  assert.deepEqual(counted, ['expired', 'cached', 'cached']);
+});
+
+test('local usage retains at most the last 30 days and Agent drafts use remembered language', async () => {
+  const start = updateUsage([], day => { day.page.sessions = 1; }, new Date(2026, 8, 1));
+  const latest = updateUsage(start, day => { day.page.rendered = 3; }, new Date(2026, 10, 26));
+  assert.deepEqual(latest, [{ date: '2026-11-26', page: { rendered: 3 }, models: {} }]);
+  const output = await generateDraft({ draft: async (_settings, context, intent, language) => {
+    assert.equal(language, 'ja');
+    assert.equal(intent, '问问主播');
+    assert.deepEqual(context, { title: 'live', streamer: null, category: null, recentChat: ['nice'] });
+    return { draft: 'どうでしたか？', backTranslation: '刚才感觉如何？' };
+  } }, defaults, {
+    room: { title: 'live', streamer: null, category: null, replyLanguage: 'ja' },
+    messages: [{ observedAt: 0, text: 'nice' }],
+  }, ' 问问主播 ');
+  assert.match(output.draft, /？/);
+});

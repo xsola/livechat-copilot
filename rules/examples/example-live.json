@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "example-live",
+  "version": 1,
+  "host": "stream.example",
+  "pathPrefix": "/live/",
+  "container": "#chat",
+  "message": ":scope > .chat-row",
+  "body": ".message-body",
+  "ignore": ".moderation"
+}

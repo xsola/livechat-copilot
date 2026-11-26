@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LiveChat Copilot</title></head>
+<body class="popup">
+  <main>
+    <h1>LiveChat Copilot</h1>
+    <p id="site">读取当前页面…</p>
+    <label class="check"><input type="checkbox" id="enabled" disabled> 在本站启用翻译</label>
+    <p class="secondary">启用后，弹幕正文与首次语言识别所需样本会发送给你配置的模型。</p>
+    <div class="actions">
+      <button type="button" id="detect" disabled>识别弹幕区</button>
+      <button type="button" id="pick" disabled>选择弹幕区域</button>
+      <button type="button" id="room" disabled>房间语言</button>
+      <button type="button" id="options">打开设置</button>
+    </div>
+    <p id="status" role="status"></p>
+  </main>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

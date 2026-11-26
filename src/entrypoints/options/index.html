@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="manifest.open_in_tab" content="true"><title>LiveChat Copilot 设置</title></head>
+<body>
+  <main class="options">
+    <h1>LiveChat Copilot 设置</h1>
+    <form id="settings">
+      <section>
+        <h2>翻译与模型</h2>
+        <label>API Base URL <input id="endpoint" type="url" required></label>
+        <label>模型 ID <input id="model" required maxlength="150"></label>
+        <label>API Key <input id="key" type="password" autocomplete="off" maxlength="2048"></label>
+        <p class="secondary">API Key 保存在扩展本地。DeepSeek 预设为 deepseek-flash，本地兼容服务可以留空密钥。</p>
+        <label class="check"><input id="image" type="checkbox"> 此模型支持图像输入</label>
+        <label class="check"><input id="json" type="checkbox"> 请求 JSON 模式</label>
+        <div class="field-row">
+          <label>阅读语言 <input id="language" required placeholder="zh-CN" maxlength="48"></label>
+          <label>调度模式 <select id="mode">
+            <option value="batch">自动微批</option><option value="single">逐条</option><option value="manual">点击翻译</option>
+          </select></label>
+        </div>
+        <label>翻译风格提示词 <textarea id="prompt" rows="3" maxlength="2000"></textarea></label>
+        <button type="button" id="reset-prompt">恢复提示词</button>
+      </section>
+      <section>
+        <h2>社区规则</h2>
+        <label>GitHub Raw 规则索引 URL <input id="registry" type="url" placeholder="https://raw.githubusercontent.com/…/rules/index.json"></label>
+        <p class="secondary">订阅后每六小时更新。新版本需要在直播页验证，提取失败时继续使用上一可用版本。</p>
+        <p id="rules-summary"></p>
+        <ul id="local-rules"></ul>
+        <button type="button" id="sync">立即更新已保存的订阅</button>
+      </section>
+      <div class="actions">
+        <button type="submit" class="primary">保存并授权</button>
+        <button type="button" id="test">测试已保存的模型</button>
+      </div>
+      <p id="status" role="status"></p>
+    </form>
+    <section>
+      <h2>本地用量</h2>
+      <p class="secondary">保留最近 30 天的汇总。诊断摘要只含计数和模型用量，由你决定是否分享。</p>
+      <label>统计范围 <select id="usage-range"><option value="7">最近 7 天</option><option value="30">最近 30 天</option></select></label>
+      <div id="usage"></div>
+      <div class="actions">
+        <button type="button" id="refresh-usage">刷新</button>
+        <button type="button" id="export">预览诊断摘要</button>
+        <button type="button" id="clear">清空</button>
+      </div>
+      <p id="usage-status" role="status"></p>
+      <div id="diagnostic-preview" hidden>
+        <label>诊断摘要 <textarea id="diagnostic" rows="10" readonly></textarea></label>
+        <button type="button" id="copy">复制摘要</button>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": { "types": ["chrome", "node", "vite/client"], "strict": true },
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "wxt.config.ts", ".wxt/types/**/*.d.ts"]
+}

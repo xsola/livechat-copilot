@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body{font-family:system-ui,sans-serif} #items,#alternate{padding:18px;min-height:90px;border:1px solid #9babc4}
+    yt-live-chat-text-message-renderer, article {display:block;padding:2px} #alternate {margin-top:24px}
+  </style>
+</head>
+<body>
+  <yt-live-chat-item-list-renderer>
+    <div id="items" role="log">
+      <yt-live-chat-text-message-renderer>
+        <span id="author-name">OriginalAuthor</span><span id="message">Amazing comeback <img alt="🎉"></span>
+      </yt-live-chat-text-message-renderer>
+      <yt-live-chat-text-message-renderer>
+        <span id="author-name">AnotherAuthor</span><span id="message">What a final play!</span>
+      </yt-live-chat-text-message-renderer>
+    </div>
+  </yt-live-chat-item-list-renderer>
+  <div id="alternate" role="log">
+    <article class="chat-row"><b class="username">AltOne</b> <span class="message-body">New tournament</span></article>
+    <article class="chat-row"><b class="username">AltTwo</b> <span class="message-body">Ready for the finals</span></article>
+  </div>
+</body>
+</html>

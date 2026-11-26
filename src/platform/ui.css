@@ -1,0 +1,34 @@
+:root {
+  color-scheme: light dark;
+  font: 14px/1.55 system-ui, sans-serif;
+  color: light-dark(#1d2839, #e7edf7);
+  background: light-dark(#f8faff, #181d27);
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.popup { width: 330px; }
+.popup main { padding: 16px; }
+.options { max-width: 720px; padding: 24px; margin: 0 auto; }
+h1 { font-size: 21px; margin: 0 0 12px; }
+h2 { font-size: 17px; margin: 0 0 12px; }
+p { margin: 8px 0; }
+section { border: 1px solid light-dark(#d3ddeb, #445269); border-radius: 8px; padding: 16px; margin: 12px 0; }
+label { display: block; margin: 8px 0; }
+input:not([type=checkbox]), textarea, select { display: block; width: 100%; margin: 4px 0; padding: 6px; }
+input, textarea, select, button {
+  font: inherit;
+  color: inherit;
+  background: light-dark(#fff, #222b39);
+  border: 1px solid light-dark(#8da6ca, #657991);
+  border-radius: 5px;
+}
+.check { display: flex; gap: 8px; align-items: center; }
+input[type=checkbox] { margin: 0; }
+textarea { resize: vertical; }
+button { padding: 5px 10px; cursor: pointer; }
+button:disabled { cursor: default; opacity: .6; }
+.primary { background: #2659a7; color: white; border-color: #2659a7; }
+.actions, .field-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.field-row label { flex: 1; min-width: 120px; }
+.secondary { color: light-dark(#4a5d79, #bac6d9); }
+#status, #usage-status { overflow-wrap: anywhere; }
