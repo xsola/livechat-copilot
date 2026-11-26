@@ -124,6 +124,11 @@
   "targetSaved": {
     "message": "Target language saved."
   },
+  "localRuleLabel": { "message": "Rule for this stream" },
+  "localRuleHelp": { "message": "Translation pauses if the selected rule cannot read this chat. Choose Auto to let the extension select a rule." },
+  "autoRule": { "message": "Auto" },
+  "unknownRuleDate": { "message": "Date unknown" },
+  "ruleSelectionSaved": { "message": "Rule selection applied to this stream." },
   "targetInvalid": {
     "message": "Enter a language name or code, such as Japanese or ja. Clear the field to use the browser language."
   }

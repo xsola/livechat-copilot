@@ -6,7 +6,7 @@ import { stageRules } from './resolver';
 
 export function summarizeRules(state: State) {
   return {
-    local: state.localRules.map(rule => ({ id: rule.id, host: rule.host, path: rule.pathPrefix })),
+    local: state.localRules.toReversed().map(rule => ({ rule, addedAt: state.localRuleAddedAt[rule.id] ?? null })),
     active: state.community.active.length,
     staged: state.community.staged.length,
   };

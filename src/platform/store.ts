@@ -17,6 +17,8 @@ export interface State {
   preferredScopes: Record<string, TranslationScope>;
   scopeOverrides: Record<string, boolean | null>;
   localRules: ChatRule[];
+  localRuleAddedAt: Record<string, number>;
+  selectedLocalRules: Record<string, string>;
   community: CommunityRules;
   roomPreferences: Record<string, RoomPreference>;
   usage: DailyUsage[];
@@ -31,6 +33,8 @@ const initial: State = {
   preferredScopes: {},
   scopeOverrides: {},
   localRules: [],
+  localRuleAddedAt: {},
+  selectedLocalRules: {},
   community: { active: [], staged: [], rejected: {} },
   roomPreferences: {},
   usage: [],

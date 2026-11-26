@@ -70,7 +70,7 @@ export function taskInstructions(task: PromptTask, settings: ModelSettings, cust
         '合成图先展示聊天区，标明提供输入区和发送控件时，随后展示这些控件。') +
         'JSON: {"verdict":"likely-chat|unlikely-chat|uncertain","bodyVerdict":"clean|mixed-metadata|uncertain","reason":"' +
         copy('short explanation', '简短说明') + '","composerVerdict":"likely-composer|unlikely-composer|uncertain"}. ' + copy(
-        'Set bodyVerdict separately from the region verdict. Use mixed-metadata when extracted text includes a sender name, badge or timestamp from the page layout. If no editor image was supplied, omit composerVerdict and discuss only the message list. Keep the exact verdict labels and write reason in the language specified by language.',
-        '分别判断区域和正文。若正文夹杂界面上的用户名、徽章或时间戳，bodyVerdict 使用 mixed-metadata。没有输入区截图时省略 composerVerdict。保持判断标签原样，reason 使用 language 指定的语言。');
+        'Set bodyVerdict separately from the region verdict. A chat list normally shows names, badges and timestamps. Use mixed-metadata only if that layout information was also included in the extracted samples. If no editor image was supplied, omit composerVerdict. Keep the exact verdict labels and write reason in the language specified by language.',
+        '分别判断区域和正文。弹幕列表显示昵称、徽章或时间戳是正常的。只有提取样本也混入这些界面信息时，bodyVerdict 才使用 mixed-metadata。没有输入区截图时省略 composerVerdict。保持判断标签原样，reason 使用 language 指定的语言。');
   }
 }

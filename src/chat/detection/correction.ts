@@ -10,14 +10,21 @@ function selectors(root: ParentNode, element: Element) {
 }
 
 export function correctionRows(first: Element, target: Element) {
-  const list = first.parentElement;
-  if (!list || list === first.ownerDocument.body) return;
-  let second: Element | null = target;
-  while (second && second.parentElement !== list) second = second.parentElement;
-  if (!second || second === first) return;
-  const selector = selectors(list, first).find(selector => second.matches(selector));
-  if (!selector || selector.length + ':scope > '.length > 500 || first.localName !== second.localName) return;
-  return { first, second, list, message: ':scope > ' + selector };
+  for (let row: Element | null = first; row; row = row.parentElement) {
+    const list: Element | null = row.parentElement;
+    if (!list || list === first.ownerDocument.body) return;
+    const listContainsTarget = list.contains(target);
+    if (!listContainsTarget) continue;
+    // If both clicks fall in a single message at this level, lifting further would merge them.
+    if (row.contains(target)) return;
+    let second: Element | null = target;
+    while (second && second.parentElement !== list) second = second.parentElement;
+    if (!second || second.localName !== row.localName ||
+      [row, second].every(node => /^(inline|contents)/.test(getComputedStyle(node).display))) return;
+    const selector = selectors(list, row).find(selector => second!.matches(selector));
+    if (!selector || selector.length + ':scope > '.length > 500) return;
+    return { first: row, second, list, message: ':scope > ' + selector };
+  }
 }
 
 export function correctionCandidates(rows: NonNullable<ReturnType<typeof correctionRows>>, body: Element, author: Element | undefined,

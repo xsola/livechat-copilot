@@ -114,12 +114,12 @@ export function createTasks(meter: Meter, request = fetch) {
         'For each ID, the chat crop is first, followed by a crop of its candidate editor only when editorImage is true. ' +
         'Match the repeated rows visible in the image to the candidate HTML and message samples. When IDs show the same list, choose the samples containing the full message without sender names or badges. Ignore player buttons, stream labels, ' +
         'static comments and unrelated lists. Pick only an ID from candidates. Return {"candidateId":"id","useComposer":true,"bodyVerdict":"clean|mixed-metadata|uncertain","reason":"short explanation"}. ' +
-        'For the selected ID, mark bodyVerdict as mixed-metadata if the extracted samples include sender names, badges or timestamps from the page layout. ' +
+        'For the selected ID, use mixed-metadata only when extracted samples include names, badges or timestamps from the page layout. Those details are normal when they appear only in the screenshot. ' +
         'Set useComposer to false when the proposed editor is visible but is not the chat input. Omit useComposer when no editor crop was provided. ' +
         'Use a null candidateId when the live chat is not shown. Write reason in the language specified by language.',
         '查找直播弹幕列表以及可见的聊天输入区。截图按候选顺序从上到下排列。每个 ID 对应先展示弹幕区，再在 editorImage 为 true 时展示输入区。' +
         '对照截图里的重复消息、HTML 和样本。多个 ID 指向同一列表时，选正文最完整且不含界面昵称、徽章和时间戳的候选。忽略播放器控件、直播标签和无关列表。' +
-        '返回 {"candidateId":"id","useComposer":true,"bodyVerdict":"clean|mixed-metadata|uncertain","reason":"简短说明"}。只使用给定 ID。样本夹杂界面昵称、徽章或时间戳时，使用 mixed-metadata。' +
+        '返回 {"candidateId":"id","useComposer":true,"bodyVerdict":"clean|mixed-metadata|uncertain","reason":"简短说明"}。只使用给定 ID。样本夹杂界面昵称、徽章或时间戳时，使用 mixed-metadata。只出现在截图里的昵称和徽章是正常的。' +
         '候选输入框不是聊天输入区时，useComposer 使用 false。未提供输入区截图时省略该字段。找不到直播弹幕时 candidateId 使用 null。reason 用 language 指定的语言。'),
         { candidates, language: settings.uiLanguage ?? settings.readingLanguage }, value => {
           const result = requireResult(chatLocation, value);

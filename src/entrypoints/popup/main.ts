@@ -86,6 +86,31 @@ function showTargetLanguage() {
   targetLanguage.value = site.targetLanguage ? languageName(site.targetLanguage, uiLocale) : '';
 }
 
+const rulePicker = document.getElementById('local-rule-picker')!;
+const localRule = document.querySelector<HTMLSelectElement>('#local-rule')!;
+function showLocalRules() {
+  rulePicker.hidden = !site.localRules.length;
+  localRule.replaceChildren(new Option(message('autoRule'), ''));
+  for (const { rule, addedAt } of site.localRules) {
+    const date = addedAt === null ? message('unknownRuleDate') : new Date(addedAt).toLocaleString(uiLocale);
+    const description = rule.body ?? rule.bodyAfter?.anchor ?? rule.container;
+    localRule.add(new Option(`${rule.pathPrefix ?? '/'} · ${description} · ${date} · ${rule.id}`, rule.id));
+  }
+  localRule.value = site.selectedRuleId ?? '';
+  localRule.disabled = false;
+}
+
+localRule.addEventListener('change', () => {
+  const room = site.scopes.find(item => item.scope === 'room');
+  if (!room) return;
+  const ruleId = localRule.value || null;
+  localRule.disabled = true;
+  void run(async () => {
+    site = await send('setRuleSelection', { tabId, roomKey: room.key, ruleId });
+    status.textContent = message('ruleSelectionSaved');
+  }).finally(showLocalRules);
+});
+
 void run(async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id === undefined) throw new Error(message('openStreamFirst'));
@@ -97,6 +122,7 @@ void run(async () => {
   }
   scope.value = site.preferredScope ?? effectiveScope(site.scopes)?.scope ?? 'site';
   showScope();
+  showLocalRules();
   emoji.checked = site.translateEmoji;
   emoji.disabled = false;
   skipReading.checked = site.skipReadingLanguage;

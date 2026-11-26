@@ -206,7 +206,7 @@ test('automatic review shows a body warning separately from a successful region 
   await panel.getByText('截图核验 · 正在核验', { exact: true }).waitFor();
   await panel.getByText('截图核验 · 请核对', { exact: true }).waitFor();
   await panel.getByText('可能是弹幕区', { exact: true }).waitFor();
-  await panel.getByText('正文可能混入昵称、徽章或时间戳，请重新核对。', { exact: true }).waitFor();
+  await panel.getByText(/提取样本可能带有昵称/).waitFor();
   const review = requestLog.find(({ messages }) => Array.isArray(messages[1].content) && JSON.parse(messages[1].content[0].text).sample);
   assert.equal(JSON.parse(review.messages[1].content[0].text).language, browserLanguage);
   assert.match(review.messages[0].content, /分别判断区域和正文/);
@@ -273,7 +273,7 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await options.getByText('已保存。', { exact: true }).waitFor();
   await live.bringToFront();
   await popup.getByRole('button', { name: '手动选择弹幕区' }).click();
-  await chat.getByText('点击包含多条弹幕的列表', { exact: false }).waitFor();
+  await chat.getByText('点击或按 Enter 确认', { exact: false }).waitFor();
   await chat.getByText('New tournament', { exact: true }).hover();
   await live.keyboard.press('ArrowUp');
   await live.keyboard.press('ArrowUp');
@@ -592,12 +592,10 @@ test('generic rule correction validates independent rows and leaves their author
   assert.deepEqual(await panel.getByRole('listitem').allTextContents(), ['First body', 'Second body']);
   await panel.getByRole('button', { name: '纠正规则' }).click();
   await list.locator('.msg').first().hover();
-  await live.keyboard.press('ArrowUp');
-  await live.keyboard.press('ArrowUp');
   await live.keyboard.press('Enter');
   await panel.getByText(/选另一条消息/).waitFor();
   await list.locator('.msg').first().click();
-  await panel.getByText(/请选择同一列表内的另一条消息/).waitFor();
+  await panel.getByText(/这次点击未能与第一条组成两行/).waitFor();
   await list.locator('.msg').nth(1).click();
   await panel.getByText(/标记正文/).waitFor();
   await list.locator('.msg').first().click();
@@ -614,11 +612,51 @@ test('generic rule correction validates independent rows and leaves their author
   assert.ok(candidates.every(candidate => candidate.html.includes('data-user-marked-author-tag')));
   await panel.getByRole('button', { name: '保存并启用规则' }).click();
   await panel.waitFor({ state: 'hidden' });
+  const saved = (await command(options, 'getSettings')).rules.local.find(item => item.rule.host === 'www.huya.com');
+  assert.ok(Number.isFinite(saved.addedAt));
   await command(options, 'setSite', { tabId: tab, enabled: true, origin: new URL(url).origin });
   await live.getByText('译：First body', { exact: true }).waitFor();
   await list.evaluate((area, html) => area.insertAdjacentHTML('beforeend', html), row('ThirdAuthor', 'Third body'));
   await live.getByText('译：Third body', { exact: true }).waitFor();
   assert.ok(requestLog.every(request => !/SampleAuthor|OtherAuthor|ThirdAuthor|Badge label/.test(JSON.stringify(request))));
+});
+
+test('local rule details show saved dates and switching changes the active chat container', { timeout: 45_000 }, async t => {
+  const { context, options, origin } = await boot(t);
+  await options.evaluate(() => chrome.storage.local.set({
+    localRules: [
+      { schemaVersion: 1, id: 'old-main', version: 1, host: 'www.youtube.com', pathPrefix: '/watch', framePathPrefix: '/live_chat',
+        container: '#items', message: 'yt-live-chat-text-message-renderer', body: '#message' },
+      { schemaVersion: 1, id: 'new-alt', version: 1, host: 'www.youtube.com', pathPrefix: '/watch', framePathPrefix: '/live_chat',
+        container: '#alternate', message: '.chat-row', body: '.message-body' },
+    ],
+    localRuleAddedAt: { 'new-alt': 1700000000000 },
+  }));
+  await options.reload();
+  const old = options.locator('#local-rules details').filter({ hasText: 'old-main' });
+  const newer = options.locator('#local-rules details').filter({ hasText: 'new-alt' });
+  await old.locator('summary').click();
+  await old.getByText('旧规则，添加时间未记录。').waitFor();
+  await newer.locator('summary').click();
+  await newer.getByText(/^添加于 /).waitFor();
+  assert.match(await newer.locator('pre').textContent(), /"container": "#alternate"/);
+  const live = await context.newPage();
+  await live.goto('https://www.youtube.com/watch?v=one');
+  const tab = await tabId(options, live.url());
+  await command(options, 'setSite', { tabId: tab, enabled: true, origin: 'https://www.youtube.com' });
+  const chat = live.frameLocator('#chatframe');
+  await chat.getByText('译：New tournament', { exact: true }).waitFor();
+  const popup = await context.newPage();
+  await live.bringToFront();
+  await popup.goto(origin + '/popup.html');
+  const select = popup.locator('#local-rule');
+  await select.selectOption('old-main');
+  await popup.getByText('已应用到当前直播间。', { exact: true }).waitFor();
+  await chat.getByText('译：Amazing comeback', { exact: true }).waitFor();
+  await chat.getByText('译：New tournament', { exact: true }).waitFor({ state: 'detached' });
+  assert.equal((await command(options, 'site', tab)).selectedRuleId, 'old-main');
+  await select.selectOption('');
+  await chat.getByText('译：New tournament', { exact: true }).waitFor();
 });
 
 test('generic rules isolate nested lists and extract marked or inline bodies without metadata', { timeout: 45_000 }, async t => {

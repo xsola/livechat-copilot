@@ -17,7 +17,7 @@ type Command = NonNullable<ReturnType<typeof parseCommand>>;
 const uiOnly = new Set<Command['kind']>([
   'getSettings', 'saveSettings', 'saveModelSettings', 'saveReadingSettings', 'probeModel', 'syncRegistry', 'usageSummary',
   'clearUsage', 'removeRule', 'site', 'setSite', 'attach', 'pageCommand', 'setTranslateEmoji', 'setSkipReadingLanguage',
-  'setPreferredScope', 'setTargetLanguage', 'promptContext', 'savePrompt',
+  'setPreferredScope', 'setTargetLanguage', 'setRuleSelection', 'promptContext', 'savePrompt',
 ]);
 const registryAlarm = 'refresh-community-rules';
 const checksInFlight = new Set<string>();
@@ -185,23 +185,34 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
   switch (cmd.kind) {
     case 'snapshot': {
       const granted = await chrome.permissions.contains({ origins: [hostPattern(parseEndpoint(state.settings.model.endpoint))] });
+      const scopes = await scopeOptions(page, state.enabledSites, state.scopeOverrides);
+      const pinned = state.selectedLocalRules[scopes[0]!.key];
+      const rules = resolveRules(page, frame, state.localRules, state.community);
       return {
         settings: {
-          enabled: await enabled(), modelConfigured: granted, imageInput: imageUnavailable(state) ? false : state.settings.model.imageInput,
+          enabled: effectiveScope(scopes)?.value === true, modelConfigured: granted, imageInput: imageUnavailable(state) ? false : state.settings.model.imageInput,
           translateEmoji: state.settings.translateEmoji,
           autoVision: state.settings.autoVision, revision: state.revision,
           readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()), mode: state.settings.mode,
         },
-        rules: resolveRules(page, frame, state.localRules, state.community),
+        rules: pinned ? rules.filter(match => match.source === 'local' && match.rule.id === pinned) : rules,
+        selectedRuleId: pinned,
       };
     }
     case 'saveRule': {
       const rule = cmd.payload;
       if (!ruleMatches(rule, page, frame)) throw new Error('The rule does not match this page and frame.');
-      return editState(latest => ({
-        changes: { localRules: [...latest.localRules.filter(item => item.id !== rule.id), rule].slice(-250) },
-        result: undefined,
-      }));
+      const roomKey = (await scopeOptions(page, state.enabledSites, state.scopeOverrides))[0]!.key;
+      return editState(latest => {
+        const existing = latest.localRules.some(item => item.id === rule.id);
+        const localRules = [...latest.localRules.filter(item => item.id !== rule.id), rule].slice(-250);
+        const ids = new Set(localRules.map(item => item.id));
+        const localRuleAddedAt = Object.fromEntries(Object.entries(latest.localRuleAddedAt).filter(([id]) => ids.has(id)));
+        if (!existing) localRuleAddedAt[rule.id] = Date.now();
+        const selectedLocalRules = Object.fromEntries(Object.entries(latest.selectedLocalRules).filter(([, id]) => ids.has(id)));
+        if (latest.selectedLocalRules[roomKey]) selectedLocalRules[roomKey] = rule.id;
+        return { changes: { localRules, localRuleAddedAt, selectedLocalRules }, result: undefined };
+      });
     }
     case 'decideRule': {
       const { id, version, passed } = cmd.payload;
@@ -397,7 +408,12 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
       return;
     }
     case 'removeRule':
-      await editState(state => ({ changes: { localRules: state.localRules.filter(rule => rule.id !== cmd.payload) }, result: undefined }));
+      await editState(state => {
+        const localRuleAddedAt = { ...state.localRuleAddedAt };
+        delete localRuleAddedAt[cmd.payload];
+        const selectedLocalRules = Object.fromEntries(Object.entries(state.selectedLocalRules).filter(([, id]) => id !== cmd.payload));
+        return { changes: { localRules: state.localRules.filter(rule => rule.id !== cmd.payload), localRuleAddedAt, selectedLocalRules }, result: undefined };
+      });
       refreshPages();
       return;
     case 'probeModel': {
@@ -433,12 +449,28 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
     case 'clearUsage':
       return editState(() => ({ changes: { usage: [] }, result: undefined }));
     case 'site':
+    case 'setRuleSelection':
     case 'setSite':
     case 'attach': {
-      const tabId = cmd.kind === 'setSite' ? cmd.payload.tabId : cmd.payload;
+      const tabId = cmd.kind === 'setSite' || cmd.kind === 'setRuleSelection' ? cmd.payload.tabId : cmd.payload;
       const page = webUrl((await chrome.tabs.get(tabId)).url);
       const origin = page.origin;
       if (cmd.kind === 'attach') return attach(tabId, page);
+      if (cmd.kind === 'setRuleSelection') {
+        const { ruleId, roomKey } = cmd.payload;
+        const current = await readState();
+        const scope = (await scopeOptions(page, current.enabledSites, current.scopeOverrides))[0]!;
+        if (scope.key !== roomKey) throw new Error('直播间已切换，请重新打开工具栏。');
+        await editState(latest => {
+          if (ruleId && !latest.localRules.some(rule => rule.id === ruleId && rule.host === page.hostname)) {
+            throw new Error('找不到可用于本站的本地规则。');
+          }
+          const choices = Object.entries(latest.selectedLocalRules).filter(([key]) => key !== roomKey);
+          if (ruleId) choices.push([roomKey, ruleId]);
+          return { changes: { selectedLocalRules: Object.fromEntries(choices.slice(-500)), revision: latest.revision + 1 }, result: undefined };
+        });
+        refreshPages();
+      }
       if (cmd.kind === 'setSite') {
         const { scope, key, enabled } = cmd.payload;
         const state = await readState();
@@ -462,6 +494,7 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
         refreshPages();
       }
       const state = await readState();
+      const scopes = await scopeOptions(page, state.enabledSites, state.scopeOverrides);
       return {
         origin, youtube: isYouTube(page.hostname) && page.protocol === 'https:',
         translateEmoji: state.settings.translateEmoji, skipReadingLanguage: state.settings.skipReadingLanguage,
@@ -469,7 +502,9 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
         targetLanguage: state.settings.readingLanguage,
         browserLanguage: readingLanguage('', chrome.i18n.getUILanguage()),
         preferredScope: state.preferredScopes[origin] ?? state.settings.preferredScope,
-        scopes: await scopeOptions(page, state.enabledSites, state.scopeOverrides),
+        scopes,
+        localRules: summarizeRules(state).local.filter(({ rule }) => rule.host === page.hostname),
+        selectedRuleId: state.selectedLocalRules[scopes[0]!.key] ?? null,
       } satisfies SiteState;
     }
   }

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { languageCode, modelConfig, settingsSchema, type PageSettings, type Settings } from './config';
-import { chatRule, type RuleMatch } from '../rules/schema';
+import { chatRule, type ChatRule, type RuleMatch } from '../rules/schema';
 import { pageCounter, type DailyUsage } from '../usage/usage';
 import type { RoomPreference } from './store';
 import type { ChatLocation, ModelProbe, RoomProfile, TranslationItem, VisionAdvice } from '../models/tasks';
@@ -47,6 +47,7 @@ const payloads = {
   usageSummary: z.undefined(),
   clearUsage: z.undefined(),
   removeRule: id,
+  setRuleSelection: z.object({ tabId: z.number().int().nonnegative(), roomKey, ruleId: id.nullable() }),
   site: z.number().int().nonnegative(),
   pageCommand: z.object({
     tabId: z.number().int().nonnegative(),
@@ -83,7 +84,7 @@ const payloads = {
   }),
 };
 
-export interface PageSnapshot { settings: PageSettings; rules: RuleMatch[] }
+export interface PageSnapshot { settings: PageSettings; rules: RuleMatch[]; selectedRuleId?: string }
 export interface SiteState {
   origin: string;
   youtube: boolean;
@@ -94,8 +95,11 @@ export interface SiteState {
   browserLanguage: string;
   preferredScope: TranslationScope | null;
   scopes: ScopeOption[];
+  localRules: LocalRuleDetails[];
+  selectedRuleId: string | null;
 }
-export interface RuleSummary { local: Array<{ id: string; host: string; path?: string }>; active: number; staged: number }
+export interface LocalRuleDetails { rule: ChatRule; addedAt: number | null }
+export interface RuleSummary { local: LocalRuleDetails[]; active: number; staged: number }
 export interface PromptContext {
   origin: string | null;
   title?: string;
@@ -121,6 +125,7 @@ interface Results {
   usageSummary: DailyUsage[];
   clearUsage: void;
   removeRule: void;
+  setRuleSelection: SiteState;
   site: SiteState;
   pageCommand: boolean;
   setTranslateEmoji: void;

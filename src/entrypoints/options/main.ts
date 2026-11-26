@@ -71,9 +71,17 @@ function showRules(rules: RuleSummary) {
   element('local-rule-panel').hidden = rules.local.length === 0;
   const list = element('local-rules');
   list.replaceChildren();
-  for (const rule of rules.local) {
+  for (const { rule, addedAt } of rules.local) {
     const row = document.createElement('li');
-    row.append(rule.host + (rule.path ?? '') + ' ');
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = rule.host + (rule.pathPrefix ?? '/') + ' · ' + rule.id;
+    const date = document.createElement('span');
+    date.className = 'rule-date secondary';
+    date.textContent = addedAt === null ? '旧规则，添加时间未记录。' : '添加于 ' + new Date(addedAt).toLocaleString();
+    summary.append(date);
+    const content = document.createElement('pre');
+    content.textContent = JSON.stringify(rule, null, 2);
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.textContent = '删除本地规则';
@@ -83,7 +91,8 @@ function showRules(rules: RuleSummary) {
         showRules((await send('getSettings', undefined)).rules);
       });
     });
-    row.append(remove);
+    details.append(summary, content, remove);
+    row.append(details);
     list.append(row);
   }
 }

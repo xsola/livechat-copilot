@@ -27,6 +27,10 @@
         <button type="button" class="primary" id="detect" data-i18n="detectChat" disabled>Detect chat region</button>
         <button type="button" id="pick" data-i18n="pickChat" disabled>Select chat region manually</button>
       </div>
+      <div id="local-rule-picker" hidden>
+        <label><span data-i18n="localRuleLabel">Rule for this stream</span><select id="local-rule" disabled></select></label>
+        <p class="secondary" data-i18n="localRuleHelp">If the selected rule cannot read this chat, translation pauses.</p>
+      </div>
     </div>
     <div class="popup-group popup-footer actions">
       <button type="button" id="options" data-i18n="settings">Open settings</button>

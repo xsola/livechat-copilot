@@ -9,7 +9,7 @@ import { correctionCandidates, correctionRows } from './correction';
 
 function bodyFeedback(verdict?: BodyVerdict) {
   if (verdict === 'clean') return '正文样本未见昵称、徽章或时间戳混入。';
-  if (verdict === 'mixed-metadata') return '正文可能混入昵称、徽章或时间戳，请重新核对。';
+  if (verdict === 'mixed-metadata') return '提取样本可能带有昵称、徽章或时间戳。列表中可以显示这些信息，译文只应取正文。';
   return verdict === 'uncertain' ? '模型无法确认样本是否只包含正文。' : '模型未单独判断正文。';
 }
 
@@ -194,7 +194,7 @@ export class Picker {
     } else {
       this.panel.showPicker(body ? '点一条弹幕正文' : '手动选择弹幕区',
         body ? '绿框标出指针下的区域。点击一条弹幕的文字，插件会据此查找弹幕列表。'
-          : '移动指针预览绿框，点击包含多条弹幕的列表。↑ 扩大选区，↓ 缩小选区，Esc 退出。');
+          : '移动指针预览绿框。↑ 扩大，↓ 缩小，点击或按 Enter 确认，Esc 退出。');
       if (!body) this.panel.button('改为点一条弹幕正文', () => this.start(true));
       this.panel.button('纠正规则', () => this.startCorrection());
     }
@@ -268,14 +268,15 @@ export class Picker {
   }
 
   private startCorrection() {
-    this.correctionStep('1/4 · 选第一条完整消息', '把绿框扩到一条弹幕整行，框住昵称和正文。↑ 向外扩展，↓ 返回指针位置，点击或按 Enter 确认。', first => {
-      this.correctionStep('2/4 · 选另一条消息', '蓝框是第一条。点击同一列表内另一条弹幕的任意位置。', target => {
+    this.correctionStep('1/4 · 选第一条消息', '可以直接指向弹幕正文，点击或按 Enter 确认。↑ 可扩到整行，↓ 返回指针位置。', first => {
+      this.correctionStep('2/4 · 选另一条消息', '蓝框是第一条。直接点击同一列表里另一条弹幕的正文，或指向它后按 Enter。', target => {
         const rows = correctionRows(first, target);
-        if (!rows) { this.panel.note('请选择同一列表内的另一条消息。选错第一条时可以重新标注。'); return; }
+        if (!rows) { this.panel.note('这次点击未能与第一条组成两行。请试另一条弹幕；若蓝框圈住了整个列表，请点「重新标注」，第一步只框一条。'); return; }
+        const messageRow = rows.first;
         this.correctionStep('3/4 · 标记正文', '点击蓝框内第一条消息的正文。如果正文和昵称共用一块文字，可以选整行，再标记独立的昵称节点。', body => {
-          if (!first.contains(body)) { this.panel.note('请在蓝框标出的第一条消息内标记正文。'); return; }
+          if (!messageRow.contains(body)) { this.panel.note('请在蓝框标出的第一条消息内标记正文。'); return; }
           const confirm = (author?: Element) => {
-            if (author && (author === first || !first.contains(author) || author.contains(body) || (body !== first && body.contains(author)))) {
+            if (author && (author === messageRow || !messageRow.contains(author) || author.contains(body) || (body !== messageRow && body.contains(author)))) {
               this.panel.note('请在第一条消息中选与正文分开的昵称节点。');
               return;
             }
@@ -283,7 +284,7 @@ export class Picker {
             if (!best) { this.panel.note('这份标注未能从两条消息中稳定提取正文。可重新标注，或尝试标出昵称。'); return; }
             const settings = this.settings();
             const modelCandidate = settings?.autoVision && settings.imageInput && settings.modelConfigured ? alternative : undefined;
-            const local = () => this.preview(best, undefined, { example: body === first ? undefined : body, deferReview: Boolean(modelCandidate) });
+            const local = () => this.preview(best, undefined, { example: body === messageRow ? undefined : body, deferReview: Boolean(modelCandidate) });
             local();
             if (modelCandidate) {
               this.panel.button('让模型比较候选规则', () => {
@@ -295,9 +296,9 @@ export class Picker {
               });
             }
           };
-          this.correctionStep('4/4 · 标记昵称', '点击第一条消息的昵称。正文有独立节点时可以跳过这一步。', confirm, first,
-            body === first ? undefined : () => confirm());
-        }, first);
+          this.correctionStep('4/4 · 标记昵称', '点击第一条消息的昵称。正文有独立节点时可以跳过这一步。', confirm, messageRow,
+            body === messageRow ? undefined : () => confirm());
+        }, messageRow);
       }, first);
     });
   }
@@ -368,7 +369,7 @@ export class Picker {
     } else {
       this.panel.showAnchored('核对弹幕样本', (example
         ? '蓝框标出你点选的正文样例，绿框标出用于读取新消息的列表。下方显示提取结果。'
-        : '绿框标出插件读取的列表。下面是从中提取的消息。样本正确就可保存。') + controls, candidate);
+        : '绿框标出读取范围，可以包含昵称和徽章。下方是规则会提取用于翻译的文字，请核对是否只有正文。') + controls, candidate);
       if (example) this.panel.highlightSample(example);
     }
     if (automatic || adjusted) {

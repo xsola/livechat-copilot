@@ -124,6 +124,11 @@
   "targetSaved": {
     "message": "已保存目标语言。"
   },
+  "localRuleLabel": { "message": "本直播间使用的规则" },
+  "localRuleHelp": { "message": "指定规则读不到弹幕时会暂停翻译。选择「自动选择」可恢复自动匹配。" },
+  "autoRule": { "message": "自动选择" },
+  "unknownRuleDate": { "message": "时间未记录" },
+  "ruleSelectionSaved": { "message": "已应用到当前直播间。" },
   "targetInvalid": {
     "message": "请输入语言名称或代码，例如日语或 ja。清空后可跟随浏览器语言。"
   }

@@ -212,7 +212,7 @@ export function startLiveChat(signal: AbortSignal) {
       }
     }
     if (!selected) {
-      if (!picker && !suggestedOnNavigation && snapshot.settings.enabled && page.pathname !== '/' &&
+      if (!picker && !suggestedOnNavigation && !snapshot.selectedRuleId && snapshot.settings.enabled && page.pathname !== '/' &&
         snapshot.rules.some(match => match.source === 'local')) {
         if (!observeUntil) {
           observeUntil = Date.now() + 5500;
@@ -303,6 +303,10 @@ export function startLiveChat(signal: AbortSignal) {
           return true;
         };
         if (matched()) return;
+        if (snapshot?.selectedRuleId) {
+          active.noCandidate('指定的本地规则暂未读到弹幕。可在工具栏切换规则，或点「纠正规则」重新标注。');
+          return;
+        }
         active.searchProgress('正在检查页面结构和重复出现的消息…');
         let { candidates, unresolvedRegion } = findCandidates(document, page, frame, activity);
         if (!candidates[0] || candidates[0].score < 9) {
