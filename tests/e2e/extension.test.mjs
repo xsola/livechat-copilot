@@ -32,7 +32,7 @@ async function boot(t, locale = 'zh-CN') {
     if (items.some(item => item.text === 'Slow original')) await new Promise(resolve => setTimeout(resolve, 900));
     if (command.candidates) await new Promise(resolve => setTimeout(resolve, 650));
     const output = command.candidates ? {
-      candidateId: command.candidates[value.model === 'test-paired-input' ? 1 : 0].id,
+      candidateId: command.candidates[/^test-paired-(input|body)$/.test(value.model) ? 1 : 0].id,
       useComposer: true, reason: 'Image matches the sample rows.',
     }
       : command.test === 'image-capability' ? { color: 'blue' }
@@ -472,6 +472,83 @@ test('Bilibili isolates the chat list and body and skips parents that shrink the
   await panel.getByText('这局打得很精彩', { exact: true }).waitFor();
   await panel.getByRole('button', { name: '保存并启用规则' }).click();
   await panel.waitFor({ state: 'hidden' });
+});
+
+test('generic rules isolate nested lists and extract marked or inline bodies without metadata', { timeout: 45_000 }, async t => {
+  const { context, options, local, requestLog } = await boot(t);
+  const metadata = '<span data-role="badge">Private badge</span><span class="chat-badge">Badge level</span><span class="username">Sender Alias</span>';
+  const clip = (content, row) => `<div data-message-id="${row}">${content}</div>`;
+  function sample(text, id, kind) {
+    if (kind === 'nested') return clip(`${metadata}<span class="message-content">${text}</span>`, id);
+    if (kind === 'uncertain') return clip(`<em>${text}</em>${metadata}`, id);
+    return clip(`<span>${metadata}</span>: ${text} <time>09:45</time>`, id);
+  }
+  const mentions = '<a class="username" data-mention>@buddy</a>: nice round';
+  for (const kind of ['nested', 'inline', 'uncertain']) {
+    const url = local + '/' + kind;
+    await context.route(url, route => route.fulfill({ contentType: 'text/html', body:
+      `<main><section id="chat-panel" role="log"><header>Static leaderboard</header>
+        <div id="chat-list" style="height:130px;overflow:auto">
+          ${sample('First message ' + kind, 1, kind)}${sample(mentions, 2, kind)}
+        </div></section></main>`,
+    }));
+    const live = await context.newPage();
+    await live.goto(url);
+    const tab = await tabId(options, url);
+    await command(options, 'attach', tab);
+    await action(options, tab, 'detect');
+    const panel = live.getByRole('region', { name: 'LiveChat Copilot' });
+    if (kind === 'uncertain') {
+      await panel.getByText('找到疑似弹幕列表').waitFor();
+      assert.equal(await panel.getByRole('button', { name: '保存并启用规则' }).count(), 0);
+      await action(options, tab, 'pick');
+      await panel.getByRole('button', { name: '改为点一条弹幕正文' }).click();
+      await live.locator('#chat-list em').first().click();
+      await panel.getByText('核对弹幕样本').waitFor();
+    } else {
+      await panel.getByText('已识别弹幕区').waitFor();
+      const outline = live.locator('[data-lcc-kind="panel"] .hover.detected');
+      assert.deepEqual(await outline.boundingBox(), await live.locator('#chat-list').boundingBox());
+    }
+    await panel.getByRole('button', { name: '保存并启用规则' }).click();
+    await panel.waitFor({ state: 'hidden' });
+    await command(options, 'setSite', { tabId: tab, enabled: true, origin: local });
+    await live.getByText('译：First message ' + kind, { exact: true }).waitFor();
+    await live.locator('#chat-list').evaluate((list, html) => list.insertAdjacentHTML('beforeend', html), sample('Next message ' + kind, 3, kind));
+    await live.getByText('译：Next message ' + kind, { exact: true }).waitFor();
+    await live.close();
+  }
+  assert.ok(requestLog.some(message => JSON.stringify(message).includes('@buddy: nice round')));
+  assert.ok(requestLog.every(message => !/Private badge|Badge level|Sender Alias|Static leaderboard|09:45/.test(JSON.stringify(message))));
+});
+
+test('vision can compare distinct body candidates from the same list', { timeout: 35_000 }, async t => {
+  const { context, options, requestLog, local } = await boot(t);
+  await options.locator('#model').fill('test-paired-body');
+  await options.getByRole('button', { name: '测试当前模型' }).click();
+  await options.getByText('支持', { exact: true }).waitFor();
+  await options.locator('#auto-vision').check();
+  await options.getByRole('button', { name: '保存并授权' }).click();
+  await options.getByText('已保存。', { exact: true }).waitFor();
+  const url = local + '/body-variants';
+  await context.route(url, route => route.fulfill({ contentType: 'text/html', body: `<section role="log" id="chat-list">
+    <div data-message-id="one"><span class="message-body">First label</span><span class="message-content">First full message</span></div>
+    <div data-message-id="two"><span class="message-body">Second label</span><span class="message-content">Second full message</span></div>
+  </section>` }));
+  const live = await context.newPage();
+  await live.goto(url);
+  await live.bringToFront();
+  const tab = await tabId(options, url);
+  await command(options, 'attach', tab);
+  await action(options, tab, 'detect');
+  await live.getByText('已用截图比对候选位置。').waitFor();
+  const request = requestLog.find(({ messages }) => Array.isArray(messages[1].content) && JSON.parse(messages[1].content[0].text).candidates);
+  const { candidates } = JSON.parse(request.messages[1].content[0].text);
+  assert.deepEqual(candidates.map(candidate => candidate.samples[0]), ['First label', 'First full message']);
+  await live.getByRole('button', { name: '保存并启用规则' }).click();
+  await live.getByRole('region', { name: 'LiveChat Copilot' }).waitFor({ state: 'hidden' });
+  const saved = await options.evaluate(async () => (await chrome.storage.local.get('localRules')).localRules);
+  assert.equal(saved.find(rule => rule.pathPrefix === '/body-variants').body, '.message-content');
 });
 
 test('the vision model sees bounded candidate samples while automatic detection displays progress', { timeout: 45_000 }, async t => {

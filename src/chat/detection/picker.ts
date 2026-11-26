@@ -3,6 +3,7 @@ import { captureRect, visibleBounds } from './viewport';
 import { send } from '../../platform/messages';
 import { PagePanel } from '../page-panel';
 import type { PageSettings } from '../../platform/config';
+import { testRule } from '../dom';
 
 function resizeSelection(selected: Element, cursor: Element | undefined, grow: boolean, previousLevel?: Element) {
   const current = visibleBounds(selected);
@@ -70,32 +71,42 @@ export class Picker {
     return this.searching;
   }
 
-  noCandidate(reason = '没有找到能稳定提取弹幕的区域。') {
+  noCandidate(reason = '没有找到能稳定提取弹幕的区域。', unresolved?: Element) {
     if (!this.searching) return;
     this.searching = false;
-    this.panel.highlight();
-    this.panel.show('未找到弹幕区', reason + '可从工具栏打开「手动选择弹幕区」。');
+    if (unresolved?.isConnected) {
+      this.panel.highlight(unresolved);
+      this.panel.showAnchored('找到疑似弹幕列表', '暂时无法可靠分离正文。可从工具栏打开「手动选择弹幕区」，再点一条弹幕正文作为示例。');
+    } else {
+      this.panel.highlight();
+      this.panel.show('未找到弹幕区', reason + '可从工具栏打开「手动选择弹幕区」。');
+    }
     this.panel.button('关闭', () => this.close());
   }
 
-  async locate(candidates: Candidate[]) {
+  async locate(candidates: Candidate[], unresolved?: Element) {
     const attempt = this.searchEpoch;
     const settings = this.settings();
     if (!settings?.imageInput || !settings.autoVision || !settings.modelConfigured) {
-      this.noCandidate();
+      this.noCandidate(undefined, unresolved);
       return;
     }
     const candidatesById = new Map<string, Candidate>();
-    const choices = candidates.slice(0, 4).flatMap(candidate => candidate.alternativeComposer
-      ? [candidate, { ...candidate, rule: candidate.alternativeComposer }]
-      : [candidate]);
+    const choices = candidates.slice(0, 4).flatMap(candidate => {
+      const options = [candidate];
+      if (candidate.alternativeBody) options.push({ ...candidate, ...candidate.alternativeBody, rule: {
+        ...candidate.alternativeBody.rule, composer: candidate.rule.composer, sendButton: candidate.rule.sendButton,
+      } });
+      if (candidate.alternativeComposer) options.push({ ...candidate, rule: candidate.alternativeComposer });
+      return options;
+    });
     const visible = choices.flatMap(candidate => {
       try {
         const rect = captureRect(candidate.container);
         return [{ candidate, rect }];
       } catch { return []; }
     });
-    if (!visible.length) { this.noCandidate(); return; }
+    if (!visible.length) { this.noCandidate(undefined, unresolved); return; }
     this.searchProgress('正在让模型对照候选区域截图和弹幕样本…');
     try {
       await this.hideForCapture();
@@ -104,22 +115,24 @@ export class Picker {
       for (const { candidate, rect } of visible) {
         if (!candidate.container.isConnected) continue;
         const editorRect = this.editorCrop(composerElements(candidate).editor);
-        if (!editorRect && [...candidatesById.values()].some(previous => previous.container === candidate.container)) continue;
+        if (!editorRect && [...candidatesById.values()].some(previous => previous.container === candidate.container &&
+          previous.rule.body === candidate.rule.body && previous.rule.bodyAfter?.anchor === candidate.rule.bodyAfter?.anchor)) continue;
         const id: string = 'area-' + (areas.length + 1);
         candidatesById.set(id, candidate);
         areas.push({ id, rect, editorRect, ...visionSample(candidate) });
         if (areas.length === 3) break;
       }
-      if (!areas.length) { this.noCandidate(); return; }
+      if (!areas.length) { this.noCandidate(undefined, unresolved); return; }
       const result = await send('locateChat', areas);
       if (!this.searching || this.searchEpoch !== attempt) return;
       const selected = result.candidateId ? candidatesById.get(result.candidateId) : undefined;
-      if (selected) {
+      const verified = selected && testRule(selected.container.ownerDocument, selected.rule, selected.container);
+      if (selected?.container.isConnected && verified && !verified.rejected && verified.messages.length >= 2) {
         const excludeComposer = result.useComposer === false && areas.some(area => area.id === result.candidateId && area.editorRect);
         if (excludeComposer) selected.rule = { ...selected.rule, composer: undefined, sendButton: undefined };
-        this.preview(selected, { located: true, excludeComposer });
+        this.preview({ ...selected, messages: verified.messages }, { located: true, excludeComposer });
       }
-      else this.noCandidate();
+      else this.noCandidate(undefined, unresolved);
     } catch (error) {
       if (this.searchEpoch === attempt) this.noCandidate(error instanceof Error ? error.message + ' ' : undefined);
     } finally {

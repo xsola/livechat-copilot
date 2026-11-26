@@ -1,8 +1,12 @@
 import type { ChatRule } from '../rules/schema';
 
 export interface DOMMessage { node: Element; body: Element; text: string; withoutEmoji: string }
-export const messageMetadata = '[rel="author"], [data-role="author"], .author, .author-name, .chat-author, .username, [data-testid="username"], ' +
-  '#author-name, .user-name, .common-nickname-wrapper, .danmaku-item-left, .fans-medal-item, .user-level-icon, .title-label';
+export const authorSelectors = ['[rel="author"]', '[data-role="author"]', '.author', '.author-name', '.chat-author',
+  '.username', '[data-testid="username"]', '#author-name', '.user-name', '.common-nickname-wrapper'];
+export const messageAuthor = authorSelectors.join(', ');
+export const messageMetadata = messageAuthor + ', .danmaku-item-left, .fans-medal-item, .user-level-icon, .title-label, ' +
+  '.chat-badge, .message-badges, [data-role="badge"], time, [data-role="timestamp"]';
+const mention = '[data-mention], [data-role="mention"], .mention, .chat-mention';
 export interface RuleTest { container: Element; messages: DOMMessage[]; rejected: boolean }
 
 export function query(root: ParentNode, selector: string) {
@@ -35,7 +39,7 @@ export function stripEmoji(text: string) {
   return Array.from(graphemes.segment(text), ({ segment }) => emoji.test(segment) ? '' : segment).join('');
 }
 
-function messageParts(root: Element) {
+function messageParts(nodes: Iterable<Node>, separator?: string) {
   let full = '';
   let words = '';
   let hasImage = false;
@@ -47,7 +51,8 @@ function messageParts(root: Element) {
     }
     if (node.nodeType !== 1) return;
     const element = node as Element;
-    if (element.matches('[data-livechat-copilot], script, style, [hidden], [aria-hidden="true"], ' + messageMetadata)) return;
+    if (element.matches('[data-livechat-copilot], script, style, [hidden], [aria-hidden="true"]') ||
+      (element.matches(messageMetadata) && !element.closest(mention))) return;
     if (element.matches('img, [role="img"][aria-label]')) {
       hasImage = true;
       const label = (element.getAttribute('alt') ?? element.getAttribute('aria-label') ?? '').trim();
@@ -61,7 +66,11 @@ function messageParts(root: Element) {
     }
     for (const child of element.childNodes) visit(child);
   };
-  visit(root);
+  for (const node of nodes) visit(node);
+  if (separator) {
+    if (full.trimStart().startsWith(separator)) full = full.trimStart().slice(1);
+    if (words.trimStart().startsWith(separator)) words = words.trimStart().slice(1);
+  }
   const stripped = stripEmoji(words);
   const remaining = normalizeText(stripped);
   return {
@@ -70,15 +79,28 @@ function messageParts(root: Element) {
   };
 }
 
-export function messageText(root: Element) {
-  return messageParts(root).text;
+export function messageTail(row: Element, selector: string) {
+  const anchors = queryAll(row, selector).filter(node => !node.closest(mention));
+  if (anchors.length !== 1) return;
+  const origin = anchors[0]!;
+  for (let anchor = origin; anchor !== row; anchor = anchor.parentElement!) {
+    const children: Node[] = [];
+    for (let next = anchor.nextSibling; next; next = next.nextSibling) children.push(next);
+    const parts = messageParts(children);
+    if (parts.hasImage || /[^\s:：]/u.test(parts.text)) return { nodes: children, ...parts, anchor: origin };
+    if (!anchor.parentElement || /[^\s:：]/u.test(messageParts([anchor.parentElement]).text)) break;
+  }
 }
 
 export function extractRow(node: Element, rule: ChatRule): DOMMessage | undefined {
   if (matches(node, rule.ignore) || node.closest('[data-livechat-copilot]')) return;
   const body = rule.body ? query(node, rule.body) : node;
-  if (!body || body.closest(messageMetadata)) return;
-  const { text, withoutEmoji, hasImage } = messageParts(body);
+  if (!body || (body.closest(messageMetadata) && !body.closest(mention))) return;
+  if (!rule.bodyAfter && queryAll(body, messageAuthor).some(author => !author.closest(mention))) return;
+  const tail = rule.bodyAfter && messageTail(node, rule.bodyAfter.anchor);
+  if (rule.bodyAfter && !tail) return;
+  const { text, withoutEmoji, hasImage } = tail
+    ? messageParts(tail.nodes, rule.bodyAfter?.separator) : messageParts([body]);
   if (text || hasImage) return { node, body, text, withoutEmoji };
 }
 
@@ -93,7 +115,7 @@ export function testRule(root: ParentNode, rule: ChatRule, container?: Element |
 
 export function invalidateSelector(rule: ChatRule) {
   try {
-    for (const selector of [rule.container, rule.message, rule.body, rule.ignore, rule.composer, rule.sendButton]) {
+    for (const selector of [rule.container, rule.message, rule.body, rule.bodyAfter?.anchor, rule.ignore, rule.composer, rule.sendButton]) {
       if (selector) document.createDocumentFragment().querySelector(selector);
     }
     return false;

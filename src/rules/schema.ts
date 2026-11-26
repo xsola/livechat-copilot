@@ -14,10 +14,11 @@ export const chatRule = z.strictObject({
   container: selector,
   message: selector,
   body: selector.optional(),
+  bodyAfter: z.strictObject({ anchor: selector, separator: z.enum([':', '：']).optional() }).optional(),
   ignore: selector.optional(),
   composer: selector.optional(),
   sendButton: selector.optional(),
-});
+}).refine(rule => !rule.body || !rule.bodyAfter, 'Use either body or bodyAfter');
 
 export const ruleIndex = z.strictObject({
   schemaVersion: z.literal(1),

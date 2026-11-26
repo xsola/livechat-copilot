@@ -104,7 +104,7 @@ export function createTasks(meter: Meter, request = fetch) {
       return call('vision', settings,
         'Find the live chat message list and its chat input if visible. The screenshot contains candidate crops in the given order, stacked from top to bottom. ' +
         'For each ID, the chat crop is first, followed by a crop of its candidate editor only when editorImage is true. ' +
-        'Match the repeated rows visible in the image to the candidate HTML and message samples. Ignore player buttons, stream labels, ' +
+        'Match the repeated rows visible in the image to the candidate HTML and message samples. When IDs show the same list, choose the samples containing the full message without sender names or badges. Ignore player buttons, stream labels, ' +
         'static comments and unrelated lists. Pick only an ID from candidates. Return {"candidateId":"id","useComposer":true,"reason":"short explanation"}. ' +
         'Set useComposer to false when the proposed editor is visible but is not the chat input. Omit useComposer when no editor crop was provided. ' +
         'Use a null candidateId when the live chat is not shown. Explain briefly in the requested language.',

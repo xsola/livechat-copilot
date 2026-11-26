@@ -14,7 +14,7 @@ import { ChatSession } from './session';
 
 function localId(rule: ChatRule) {
   let hash = 2166136261;
-  for (const char of JSON.stringify([rule.host, rule.pathPrefix, rule.framePathPrefix, rule.container, rule.message, rule.body])) {
+  for (const char of JSON.stringify([rule.host, rule.pathPrefix, rule.framePathPrefix, rule.container, rule.message, rule.body, rule.bodyAfter])) {
     hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
   }
   return 'local-' + (hash >>> 0).toString(16);
@@ -218,8 +218,8 @@ export function startLiveChat(signal: AbortSignal) {
           observeUntil = Date.now() + 5500;
           trackActivity();
         }
-        const [best, next] = findCandidates(document, page, frame, activity);
-        if (best && best.score >= 12 && (!next || best.score - next.score > 2) &&
+        const { candidates: [best, next] } = findCandidates(document, page, frame, activity);
+        if (best && !best.alternativeBody && best.score >= 12 && (!next || best.score - next.score > 2) &&
           (/^\/(?:live|room|channel)\//i.test(page.pathname) || best.container.getAttribute('role') === 'log' ||
             (activity.get(best.container) ?? 0) >= 2)) {
           suggestedOnNavigation = true;
@@ -304,7 +304,7 @@ export function startLiveChat(signal: AbortSignal) {
         };
         if (matched()) return;
         active.searchProgress('正在检查页面结构和重复出现的消息…');
-        let candidates = findCandidates(document, page, frame, activity);
+        let { candidates, unresolvedRegion } = findCandidates(document, page, frame, activity);
         if (!candidates[0] || candidates[0].score < 9) {
           active.searchProgress('正在等待新弹幕，确认哪个区域持续更新…');
           await new Promise(resolve => setTimeout(resolve, candidates.length ? 1100 : 1800));
@@ -312,16 +312,18 @@ export function startLiveChat(signal: AbortSignal) {
           nextScan = 0;
           scan();
           if (matched()) return;
-          candidates = findCandidates(document, page, frame, activity);
+          ({ candidates, unresolvedRegion } = findCandidates(document, page, frame, activity));
         }
         const [best, runnerUp] = candidates;
         const canCompare = snapshot?.settings.autoVision && snapshot.settings.imageInput && snapshot.settings.modelConfigured;
-        if (best && canCompare && ((runnerUp && best.score - runnerUp.score <= 2) || best.alternativeComposer)) {
-          await active.locate(candidates);
+        if (best && canCompare && ((runnerUp && best.score - runnerUp.score <= 2) || best.alternativeComposer || best.alternativeBody)) {
+          await active.locate(candidates, unresolvedRegion);
+        } else if (best?.alternativeBody) {
+          active.noCandidate(undefined, best.container);
         } else if (best && best.score >= 9) {
           if (active.suggest(best)) meter.count('automatic');
         } else {
-          await active.locate(candidates);
+          await active.locate(candidates, unresolvedRegion);
         }
       })().catch(error => active.noCandidate(error instanceof Error ? error.message + ' ' : undefined)).finally(() => {
         if (currentSearch !== searchNumber) return;
