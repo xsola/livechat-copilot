@@ -452,12 +452,26 @@ test('Twitch finds nested chat, keeps the chosen scope, and leaves no picker on 
   await outline.waitFor({ state: 'hidden' });
   await action(options, tab, 'pick');
   await panel.getByRole('button', { name: '改为点一条弹幕正文' }).click();
-  await live.getByText('Fantastic', { exact: true }).click();
+  const word = live.getByText('Fantastic', { exact: true });
+  await word.hover();
+  await outline.waitFor();
+  assert.deepEqual(await outline.boundingBox(), await word.boundingBox());
+  assert.equal(await outline.evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(34, 197, 94, 0.16)');
+  await word.click();
   await panel.getByText('核对弹幕样本', { exact: true }).waitFor();
   await panel.getByText('What a game!', { exact: true }).waitFor();
+  assert.deepEqual(await outline.boundingBox(), await chatList.boundingBox());
   await panel.getByRole('button', { name: '关闭', exact: true }).click();
   await panel.waitFor({ state: 'hidden' });
   await live.locator('[data-lcc-kind="panel"] .hover').waitFor({ state: 'hidden' });
+
+  await action(options, tab, 'pick');
+  const outsideChat = live.getByText('LIVE', { exact: true });
+  await outsideChat.click();
+  await panel.getByText('暂时无法用这个选区提取弹幕').waitFor();
+  assert.deepEqual(await outline.boundingBox(), await outsideChat.boundingBox());
+  await live.keyboard.press('Escape');
+  await outline.waitFor({ state: 'hidden' });
 
   await action(options, tab, 'pick');
   await live.getByText('Fantastic', { exact: true }).hover();
@@ -536,6 +550,8 @@ test('generic rules isolate nested lists and extract marked or inline bodies wit
       await panel.getByRole('button', { name: '改为点一条弹幕正文' }).click();
       await live.locator('#chat-list em').first().click();
       await panel.getByText('核对弹幕样本').waitFor();
+      assert.deepEqual(await live.locator('[data-lcc-kind="panel"] .hover.detected').boundingBox(),
+        await live.locator('#chat-list').boundingBox());
     } else {
       await panel.getByText('已识别弹幕区').waitFor();
       const outline = live.locator('[data-lcc-kind="panel"] .hover.detected');

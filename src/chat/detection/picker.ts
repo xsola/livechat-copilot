@@ -176,15 +176,15 @@ export class Picker {
     this.selected = initial?.container;
     this.cursor = initial?.messages[0]?.node ?? initial?.container.firstElementChild ?? undefined;
     const expandedFrom: Element[] = [];
-    this.panel.highlight(this.selected, Boolean(initial));
+    this.panel.highlight(this.selected, true);
     const choose = () => { if (this.selected) this.choose(this.selected, body, Boolean(initial)); };
     if (initial) {
       this.panel.showAnchored('调整框选范围', '↑ 扩大可见区域，↓ 缩小可见区域。按 Enter 确认，按 Esc 关闭。');
       this.panel.button('确认调整', choose);
     } else {
       this.panel.showAside(body ? '点一条弹幕正文' : '手动选择弹幕区',
-        body ? '在聊天里点击一条消息的文字，插件会从这条消息向外查找弹幕列表。'
-          : '点击包含多条弹幕的列表。↑ 扩大选区，↓ 缩小选区，Esc 退出。');
+        body ? '绿框标出指针下的区域。点击一条弹幕的文字，插件会据此查找弹幕列表。'
+          : '移动指针预览绿框，点击包含多条弹幕的列表。↑ 扩大选区，↓ 缩小选区，Esc 退出。');
       if (!body) this.panel.button('改为点一条弹幕正文', () => this.start(true));
     }
     this.panel.button('取消', () => this.close());
@@ -207,7 +207,7 @@ export class Picker {
         while (descendant?.parentElement && descendant.parentElement !== this.selected) descendant = descendant.parentElement;
         if (descendant?.parentElement === this.selected) this.selected = descendant;
       }
-      this.panel.highlight(this.selected, Boolean(initial));
+      this.panel.highlight(this.selected, true);
       if (initial) {
         const { width, height } = visibleBounds(this.selected);
         const change = event.key === 'ArrowUp' ? '扩大' : '缩小';
@@ -218,10 +218,10 @@ export class Picker {
     document.addEventListener('keydown', handleKey, options);
     if (window.top !== window) window.top?.document.addEventListener('keydown', handleKey, options);
     if (initial) return;
-    document.addEventListener('mousemove', event => {
+    document.addEventListener('pointermove', event => {
       if (this.panel.contains(event) || !(event.target instanceof Element)) return;
       if (this.cursor !== event.target) this.selected = this.cursor = event.target;
-      this.panel.highlight(this.selected);
+      this.panel.highlight(this.selected, true);
     }, options);
     document.addEventListener('pointerdown', event => {
       if (this.panel.contains(event)) return;
@@ -246,11 +246,12 @@ export class Picker {
       return;
     }
     this.endListeners();
-    this.panel.highlight();
-    this.panel.show('暂时无法用这个选区提取弹幕', '请点聊天消息中的文字，或手动选中包含多条消息的列表。');
+    this.panel.highlight(node, true);
+    this.panel.showAnchored('暂时无法用这个选区提取弹幕', '绿框标出刚才选择的范围。请点一条聊天消息的正文，或选中包含多条消息的列表。');
     this.panel.button('点一条弹幕正文', () => this.start(true));
     this.panel.button('手动选整个弹幕区', () => this.start());
     this.panel.button('关闭', () => this.close());
+    this.dismissOnEscape();
   }
 
   private preview(candidate: Candidate, automatic?: { source?: string; located?: ReviewFeedback; excludeComposer?: boolean; localOnly?: boolean }, adjusted = false) {
@@ -261,7 +262,7 @@ export class Picker {
       rule: automatic?.excludeComposer ? candidate.rule : completeCandidateRule(document, candidate.container, candidate.rule),
     };
     this.showing = candidate;
-    this.panel.highlight(candidate.container, Boolean(automatic) || adjusted);
+    this.panel.highlight(candidate.container, true);
     const { state, button } = composerElements(candidate);
     const controls = state === 'editable'
       ? (button ? '已找到输入区和发送按钮。' : '已找到可编辑输入区，发送按钮暂未识别。')
@@ -277,19 +278,12 @@ export class Picker {
     } else if (adjusted) {
       this.panel.showAnchored('核对弹幕样本', '下面是从调整后的绿框内读到的消息。' + controls, candidate);
     } else {
-      this.panel.show('核对弹幕样本', '下面是从候选区读到的消息。样本正确就可保存。' + controls, candidate);
+      this.panel.showAnchored('核对弹幕样本', '绿框标出插件读取的列表。下面是从中提取的消息。样本正确就可保存。' + controls, candidate);
     }
     if (automatic || adjusted) {
       this.panel.button('调整框选范围', () => this.start(false, candidate));
-      const { signal } = this.controller = new AbortController();
-      const dismiss = (event: KeyboardEvent) => {
-        if (event.key !== 'Escape') return;
-        event.preventDefault();
-        this.close();
-      };
-      document.addEventListener('keydown', dismiss, { capture: true, signal });
-      if (window.top !== window) window.top?.document.addEventListener('keydown', dismiss, { capture: true, signal });
     }
+    this.dismissOnEscape();
     const saveButton = source ? undefined : this.panel.button('保存并启用规则', button => {
         button.disabled = true;
         void this.save(candidate).then(() => this.close(), error => {
@@ -401,6 +395,17 @@ export class Picker {
   private endListeners() {
     this.controller?.abort();
     this.controller = undefined;
+  }
+
+  private dismissOnEscape() {
+    const { signal } = this.controller = new AbortController();
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      this.close();
+    };
+    document.addEventListener('keydown', dismiss, { capture: true, signal });
+    if (window.top !== window) window.top?.document.addEventListener('keydown', dismiss, { capture: true, signal });
   }
 
   close() {
