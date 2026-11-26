@@ -70,30 +70,54 @@ async function run(target: HTMLElement, operation: () => Promise<void>) {
 function showRules(rules: RuleSummary) {
   element('local-rule-panel').hidden = rules.local.length === 0;
   const list = element('local-rules');
+  const expanded = new Set(Array.from(list.querySelectorAll<HTMLDetailsElement>('details[open]'), details => details.dataset.key));
   list.replaceChildren();
-  for (const { rule, addedAt } of rules.local) {
-    const row = document.createElement('li');
-    const details = document.createElement('details');
-    const summary = document.createElement('summary');
-    summary.textContent = rule.host + (rule.pathPrefix ?? '/') + ' · ' + rule.id;
-    const date = document.createElement('span');
-    date.className = 'rule-date secondary';
-    date.textContent = addedAt === null ? '旧规则，添加时间未记录。' : '添加于 ' + new Date(addedAt).toLocaleString();
-    summary.append(date);
-    const content = document.createElement('pre');
-    content.textContent = JSON.stringify(rule, null, 2);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.textContent = '删除本地规则';
-    remove.addEventListener('click', () => {
-      void run(element('local-rule-status'), async () => {
-        await send('removeRule', rule.id);
-        showRules((await send('getSettings', undefined)).rules);
+  const byHost = new Map<string, RuleSummary['local']>();
+  for (const entry of rules.local) {
+    const host = entry.rule.host;
+    const group = byHost.get(host) ?? [];
+    group.push(entry);
+    byHost.set(host, group);
+  }
+  for (const [host, entries] of byHost) {
+    const groupRow = document.createElement('li');
+    const group = document.createElement('details');
+    group.className = 'local-rule-group';
+    group.dataset.key = 'host:' + host;
+    group.open = expanded.has(group.dataset.key);
+    const groupTitle = document.createElement('summary');
+    groupTitle.textContent = `${host}（${entries.length} 条规则）`;
+    const hostRules = document.createElement('ul');
+    for (const { rule, addedAt } of entries) {
+      const row = document.createElement('li');
+      const details = document.createElement('details');
+      details.className = 'local-rule-entry';
+      details.dataset.key = 'rule:' + rule.id;
+      details.open = expanded.has(details.dataset.key);
+      const summary = document.createElement('summary');
+      summary.textContent = (rule.pathPrefix ?? '/') + ' · ' + rule.id;
+      const date = document.createElement('span');
+      date.className = 'rule-date secondary';
+      date.textContent = addedAt === null ? '旧规则，添加时间未记录。' : '添加于 ' + new Date(addedAt).toLocaleString();
+      summary.append(date);
+      const content = document.createElement('pre');
+      content.textContent = JSON.stringify(rule, null, 2);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '删除本地规则';
+      remove.addEventListener('click', () => {
+        void run(element('local-rule-status'), async () => {
+          await send('removeRule', rule.id);
+          showRules((await send('getSettings', undefined)).rules);
+        });
       });
-    });
-    details.append(summary, content, remove);
-    row.append(details);
-    list.append(row);
+      details.append(summary, content, remove);
+      row.append(details);
+      hostRules.append(row);
+    }
+    group.append(groupTitle, hostRules);
+    groupRow.append(group);
+    list.append(groupRow);
   }
 }
 

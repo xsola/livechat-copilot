@@ -629,12 +629,20 @@ test('local rule details show saved dates and switching changes the active chat 
         container: '#items', message: 'yt-live-chat-text-message-renderer', body: '#message' },
       { schemaVersion: 1, id: 'new-alt', version: 1, host: 'www.youtube.com', pathPrefix: '/watch', framePathPrefix: '/live_chat',
         container: '#alternate', message: '.chat-row', body: '.message-body' },
+      { schemaVersion: 1, id: 'other-site', version: 1, host: 'example.com', container: '#messages', message: 'li' },
     ],
     localRuleAddedAt: { 'new-alt': 1700000000000 },
   }));
   await options.reload();
-  const old = options.locator('#local-rules details').filter({ hasText: 'old-main' });
-  const newer = options.locator('#local-rules details').filter({ hasText: 'new-alt' });
+  const groups = options.locator('#local-rules .local-rule-group');
+  const youtube = groups.filter({ has: options.getByText('www.youtube.com（2 条规则）', { exact: true }) });
+  const old = youtube.locator('.local-rule-entry').filter({ hasText: 'old-main' });
+  const newer = youtube.locator('.local-rule-entry').filter({ hasText: 'new-alt' });
+  await youtube.locator(':scope > summary').waitFor();
+  assert.equal(await groups.count(), 2);
+  assert.equal(await groups.evaluateAll(nodes => nodes.every(node => !node.open)), true);
+  assert.equal(await old.isVisible(), false);
+  await youtube.locator(':scope > summary').click();
   await old.locator('summary').click();
   await old.getByText('旧规则，添加时间未记录。').waitFor();
   await newer.locator('summary').click();
@@ -657,6 +665,11 @@ test('local rule details show saved dates and switching changes the active chat 
   assert.equal((await command(options, 'site', tab)).selectedRuleId, 'old-main');
   await select.selectOption('');
   await chat.getByText('译：New tournament', { exact: true }).waitFor();
+  await old.getByRole('button', { name: '删除本地规则' }).click();
+  const updatedGroup = groups.filter({ has: options.getByText('www.youtube.com（1 条规则）', { exact: true }) });
+  await updatedGroup.locator(':scope > summary').waitFor();
+  assert.equal(await updatedGroup.evaluate(node => node.open), true);
+  assert.equal(await updatedGroup.locator('pre').isVisible(), true);
 });
 
 test('generic rules isolate nested lists and extract marked or inline bodies without metadata', { timeout: 45_000 }, async t => {

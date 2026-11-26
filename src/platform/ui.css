@@ -17,6 +17,9 @@ body { margin: 0; }
 .popup-group #local-rule { width: 100%; }
 #local-rules li + li { margin-top: 10px; }
 #local-rules summary { cursor: pointer; overflow-wrap: anywhere; }
+#local-rules, #local-rules ul { list-style: none; padding-left: 0; }
+#local-rules .local-rule-group > summary { font-weight: 600; }
+#local-rules .local-rule-group > ul { margin: 8px 0 0 9px; padding-left: 13px; border-left: 1px solid #b9c5d8; }
 #local-rules .rule-date { display: block; font-size: .85rem; margin: 3px 0; }
 #local-rules pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .9rem; }
 .target-language-form { display: flex; align-items: flex-end; gap: 8px; margin: 8px 0; }
