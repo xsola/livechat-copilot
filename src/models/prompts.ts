@@ -30,6 +30,6 @@ export function taskInstructions(task: PromptTask, settings: Pick<Settings, 'pro
     case 'vision':
       return custom + '\n\nThe image shows chat first, followed by the editor and send control when indicated. ' +
         'Return {"verdict":"likely-chat|unlikely-chat|uncertain","reason":"short explanation","composerVerdict":"likely-composer|unlikely-composer|uncertain"}. ' +
-        'Omit composerVerdict if no editor image was supplied. Use exact verdicts and write the reason in the requested language.';
+        'If no editor image was supplied, omit composerVerdict and discuss only the message list. Use exact verdicts and write the reason in the requested language.';
   }
 }

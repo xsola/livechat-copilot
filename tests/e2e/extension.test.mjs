@@ -32,7 +32,7 @@ async function boot(t) {
     if (items.some(item => item.text === 'Slow original')) await new Promise(resolve => setTimeout(resolve, 900));
     const output = command.test === 'image-capability' ? { color: 'blue' }
       : Array.isArray(content) ? { verdict: 'likely-chat', reason: 'Synthetic region confirmed.',
-        composerVerdict: command.sample.editorImage ? 'likely-composer' : undefined }
+        composerVerdict: command.sample.editorImage ? 'likely-composer' : 'unlikely-composer' }
       : items.length ? { translations: items.map(({ id, text }) => ({ id, text: '译：' + text })) }
       : command.check ? { ok: true } : { language: 'en', title: null, streamer: null, category: null };
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
@@ -131,6 +131,41 @@ test('the visible dist directory loads without modifying the manifest', { timeou
   });
   const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', { timeout: 12_000 });
   assert.equal(await worker.evaluate(() => chrome.runtime.getManifest().name), 'LiveChat Copilot');
+});
+
+test('YouTube restricted input is recognized without inferring a send-area mismatch', { timeout: 40_000 }, async t => {
+  const { context, options, requestLog } = await boot(t);
+  await options.getByRole('button', { name: '测试当前模型' }).click();
+  await options.getByText('支持', { exact: true }).waitFor();
+  await options.locator('#auto-vision').check();
+  await options.getByRole('button', { name: '保存并授权' }).click();
+  const live = await context.newPage();
+  await live.goto('https://www.youtube.com/watch?v=restricted');
+  await live.bringToFront();
+  const chat = live.frameLocator('#chatframe');
+  await chat.locator('body').evaluate(body => {
+    const area = document.createElement('yt-live-chat-message-input-renderer');
+    area.innerHTML = '<div id="input" role="textbox" aria-disabled="true">以订阅者的身份聊天</div>';
+    body.prepend(area);
+  });
+  const tab = await tabId(options, live.url());
+  await action(options, tab, 'detect');
+  await chat.getByText('已找到输入区，当前无法编辑。', { exact: false }).waitFor();
+  await chat.getByText('Synthetic region confirmed.', { exact: false }).waitFor();
+  assert.equal(await chat.getByText('发送区可能不匹配', { exact: false }).count(), 0);
+  const payloads = () => requestLog.flatMap(body => {
+    const content = body.messages[1].content;
+    return Array.isArray(content) ? [JSON.parse(content[0].text).sample].filter(Boolean) : [];
+  });
+  assert.equal(payloads()[0].editorImage, false);
+  await chat.locator('yt-live-chat-message-input-renderer').evaluate(area => {
+    area.innerHTML = '<div id="input" contenteditable="true" style="height:28px"></div><div id="send-button"><button>Send</button></div>';
+  });
+  await action(options, tab, 'detect');
+  await chat.getByText('已找到输入区和发送按钮。', { exact: false }).waitFor();
+  await chat.getByText('发送区可能匹配', { exact: false }).waitFor();
+  assert.equal(payloads()[1].editorImage, true);
+  assert.equal(payloads()[1].sendImage, true);
 });
 
 test('YouTube iframe translates incrementally, saves a manual override, and reuses it after reload', { timeout: 65_000 }, async t => {

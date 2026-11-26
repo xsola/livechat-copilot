@@ -1,5 +1,6 @@
 import { matches, messageText, query, selectorPath, stableSelector, testRule, type RuleTest } from '../dom';
 import type { ChatRule } from '../../rules/schema';
+import { isYouTube } from '../../platform/config';
 
 export interface Candidate extends RuleTest { rule: ChatRule; score: number }
 
@@ -10,7 +11,7 @@ const messageBodies = [
 ];
 const author = '[rel="author"], [class*="author" i], [class*="username" i], [data-testid*="username" i], #author-name';
 const excluded = 'nav, header, footer, form, video, canvas, [data-livechat-copilot]';
-const editors = 'textarea, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], input[type="text"]';
+const editors = 'textarea, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], input[type="text"], input:not([type])';
 const sendLabel = /\b(?:send|submit|post|chat.send)\b|发送|發送|送信|전송/i;
 
 function sharedBody(row: Element, example: Element) {
@@ -86,10 +87,22 @@ export function completeCandidateRule(document: Document, region: Element, rule:
 
 export function composerElements(candidate: Candidate) {
   const root = candidate.container.ownerDocument;
-  const editor = candidate.rule.composer ? query(root, candidate.rule.composer) : null;
-  if (!editor || !matches(editor, editors)) return { editor: null, button: null };
+  const visible = (element: Element | null) => Boolean(element?.getClientRects().length &&
+    root.defaultView?.getComputedStyle(element).visibility === 'visible');
+  const configured = candidate.rule.composer ? query(root, candidate.rule.composer) : null;
+  const youtubeArea = isYouTube(candidate.rule.host)
+    ? query(root, 'yt-live-chat-message-input-renderer, yt-live-chat-renderer #input-panel [role="textbox"]') : null;
+  const area = visible(configured) ? configured : visible(youtubeArea) ? youtubeArea : null;
+  if (!area) return { editor: null, button: null, state: 'missing' as const };
+  const editor = matches(area, editors) ? area : query(area, editors);
+  const blocked = !editor || !visible(editor) || editor.closest('[aria-disabled="true"], [inert]') ||
+    matches(editor, ':disabled, [readonly], [aria-readonly="true"]');
+  if (blocked || !(editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement ||
+    (editor instanceof HTMLElement && editor.isContentEditable))) {
+    return { editor: null, button: null, state: 'unavailable' as const };
+  }
   const button = candidate.rule.sendButton ? query(root, candidate.rule.sendButton) : null;
-  return { editor, button };
+  return { editor, button: visible(button) ? button : null, state: 'editable' as const };
 }
 
 export function findCandidate(document: Document, page: URL, frame: URL, activity: ReadonlyMap<Element, number>) {

@@ -108,8 +108,12 @@ export class Picker {
     this.showing = candidate;
     this.region = candidate.container;
     this.panel.highlight(candidate.container);
-    const { editor, button } = composerElements(candidate);
-    const controls = editor ? (button ? '已找到输入区和发送按钮。' : '已找到输入区，发送按钮暂未识别。') : '暂未找到可用的输入区。';
+    const { state, button } = composerElements(candidate);
+    const controls = state === 'editable'
+      ? (button ? '已找到输入区和发送按钮。' : '已找到可编辑输入区，发送按钮暂未识别。')
+      : state === 'unavailable'
+        ? '已找到输入区，当前无法编辑。'
+        : '当前页面未识别到输入区。';
     this.panel.show(source ? '已识别弹幕' : '确认弹幕区域',
       (source ? '当前规则来源：' + source + '。' : '确认后保存为本站的本地规则。') + controls, candidate);
     let saveButton: HTMLButtonElement | undefined;
@@ -149,7 +153,8 @@ export class Picker {
       this.panel.note(settings.autoVision ? '请先在设置中授权模型服务。' : '截图核验未开启。');
       return;
     }
-    const key = JSON.stringify([settings.revision, candidate.rule]);
+    const { state, button } = composerElements(candidate);
+    const key = JSON.stringify([settings.revision, candidate.rule, state, Boolean(button)]);
     const existing = this.reviews.get(key);
     if (existing) { this.panel.note(existing); return; }
     this.panel.note('正在自动复核候选规则…');
@@ -192,7 +197,7 @@ export class Picker {
       const sendRect = editorRect ? optionalCrop(button) : undefined;
       const result = await send('verify', { rect, editorRect, sendRect, ...visionSample(candidate) });
       const prefix = { 'likely-chat': '可能是弹幕区', 'unlikely-chat': '可能选错了弹幕区', uncertain: '无法确定弹幕区' }[result.verdict];
-      const composer = result.composerVerdict && {
+      const composer = editorRect && result.composerVerdict && {
         'likely-composer': '发送区可能匹配',
         'unlikely-composer': '发送区可能不匹配',
         uncertain: '无法确定发送区',
