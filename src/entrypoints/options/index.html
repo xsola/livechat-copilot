@@ -57,6 +57,24 @@
         <p id="preferences-status" role="status"></p>
       </section>
     </form>
+    <section>
+      <details id="advanced-prompt">
+        <summary>高级设置 · 模型提示词</summary>
+        <p id="prompt-context" class="secondary">读取当前配置…</p>
+        <label>模型任务 <select id="prompt-task">
+          <option value="translation">弹幕翻译</option><option value="roomProfile">直播间语言识别</option><option value="vision">截图核验</option>
+        </select></label>
+        <label>任务指令 <textarea id="system-instruction" rows="4" maxlength="4000" readonly></textarea></label>
+        <div class="actions">
+          <button type="button" id="edit-system" disabled>解锁编辑</button>
+          <button type="button" id="save-system" disabled>保存任务指令</button>
+          <button type="button" id="reset-system" disabled>恢复默认</button>
+        </div>
+        <p id="system-status" role="status"></p>
+        <label>实际发送的系统提示词 <textarea id="system-preview" rows="7" readonly></textarea></label>
+        <p class="secondary">预览包含已保存的任务指令、翻译风格和输出格式要求。直播弹幕与截图会按任务另行传入。</p>
+      </details>
+    </section>
     <section id="local-rule-panel" hidden>
       <h2>本地规则</h2>
       <ul id="local-rules"></ul>
@@ -69,7 +87,7 @@
       <div id="usage"></div>
       <div class="actions">
         <button type="button" id="refresh-usage">刷新</button>
-        <button type="button" id="export">预览诊断摘要</button>
+        <button type="button" id="export" aria-controls="diagnostic-preview" aria-expanded="false">预览诊断摘要</button>
         <button type="button" id="clear">清空</button>
       </div>
       <p id="usage-status" role="status"></p>

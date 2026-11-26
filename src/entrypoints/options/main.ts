@@ -1,6 +1,7 @@
 import '../../platform/ui.css';
 import { defaultPrompt, hostPattern, isTextOnlyModel, languageCode, modelConfig, parseEndpoint, type ModelConfig, type Settings } from '../../platform/config';
-import { send, type RuleSummary } from '../../platform/messages';
+import { send, type PromptContext, type RuleSummary } from '../../platform/messages';
+import type { PromptTask } from '../../models/prompts';
 import type { DailyUsage, ModelTask, PageCounter, TaskUsage } from '../../usage/usage';
 
 const field = (id: string) => document.querySelector<HTMLInputElement>('#' + id)!;
@@ -168,6 +169,61 @@ window.addEventListener('focus', () => {
 });
 void run(usageStatus, showUsage);
 
+const advanced = document.querySelector<HTMLDetailsElement>('#advanced-prompt')!;
+const instruction = document.querySelector<HTMLTextAreaElement>('#system-instruction')!;
+const systemPreview = document.querySelector<HTMLTextAreaElement>('#system-preview')!;
+const systemStatus = element('system-status');
+const editSystem = document.querySelector<HTMLButtonElement>('#edit-system')!;
+const saveSystem = document.querySelector<HTMLButtonElement>('#save-system')!;
+const resetSystem = document.querySelector<HTMLButtonElement>('#reset-system')!;
+const fromTab = new URL(location.href).searchParams.get('fromTab');
+const sourceTab = fromTab && /^\d+$/.test(fromTab) ? Number(fromTab) : undefined;
+const currentTask = () => field('prompt-task').value as PromptTask;
+let promptContext: PromptContext | undefined;
+
+function showPrompt() {
+  if (!promptContext) return;
+  const info = promptContext.prompts[currentTask()];
+  instruction.value = info.instruction;
+  instruction.readOnly = true;
+  systemPreview.value = info.system;
+  editSystem.disabled = false;
+  saveSystem.disabled = true;
+  resetSystem.disabled = false;
+  resetSystem.textContent = promptContext.origin ? '恢复继承设置' : '恢复默认';
+  element('prompt-context').textContent = [
+    promptContext.origin ? '当前网站 ' + promptContext.origin : '全局默认',
+    promptContext.title, promptContext.model, '阅读语言 ' + promptContext.readingLanguage,
+  ].filter(Boolean).join(' · ');
+}
+
+async function refreshPrompt() {
+  promptContext = await send('promptContext', sourceTab);
+  showPrompt();
+}
+
+advanced.addEventListener('toggle', () => {
+  if (advanced.open) void run(systemStatus, refreshPrompt);
+});
+field('prompt-task').addEventListener('change', showPrompt);
+editSystem.addEventListener('click', () => {
+  instruction.readOnly = false;
+  saveSystem.disabled = false;
+  editSystem.disabled = true;
+  instruction.focus();
+});
+function updatePrompt(value: string | null) {
+  void run(systemStatus, async () => {
+    if (!promptContext) return;
+    if (value === '') throw new Error('请填写指令，或使用恢复按钮。');
+    promptContext = await send('savePrompt', { tabId: sourceTab, origin: promptContext.origin, task: currentTask(), value });
+    showPrompt();
+    systemStatus.textContent = value === null ? '已恢复。' : '任务指令已保存。';
+  });
+}
+saveSystem.addEventListener('click', () => updatePrompt(instruction.value.trim()));
+resetSystem.addEventListener('click', () => updatePrompt(null));
+
 function currentModel() {
   return modelConfig.parse({ ...modelFields(), imageInput: imageCapability() });
 }
@@ -194,6 +250,7 @@ document.querySelector<HTMLFormElement>('#settings')!.addEventListener('submit',
         readingLanguage: currentLanguage(), mode: field('mode').value as Settings['mode'], prompt: field('prompt').value,
       });
       target.textContent = '翻译偏好已保存。';
+      if (advanced.open && instruction.readOnly) await refreshPrompt();
     });
     return;
   }
@@ -207,6 +264,7 @@ document.querySelector<HTMLFormElement>('#settings')!.addEventListener('submit',
     const { settings, imageUnavailable } = await send('getSettings', undefined);
     rememberCapability(settings.model, imageUnavailable);
     status.textContent = '已保存。';
+    if (advanced.open && instruction.readOnly) await refreshPrompt();
   });
 });
 
@@ -252,18 +310,25 @@ element('clear').addEventListener('click', () => {
   void run(usageStatus, async () => {
     await send('clearUsage', undefined);
     diagnostic.value = '';
-    element('diagnostic-preview').hidden = true;
+    setDiagnosticOpen(false);
     await showUsage();
     usageStatus.textContent = '已清空。';
   });
 });
+function setDiagnosticOpen(open: boolean) {
+  element('diagnostic-preview').hidden = !open;
+  element('export').setAttribute('aria-expanded', String(open));
+  element('export').textContent = open ? '收起诊断摘要' : '预览诊断摘要';
+}
 element('export').addEventListener('click', () => {
+  const open = element('diagnostic-preview').hidden === true;
+  setDiagnosticOpen(open);
+  if (!open) return;
   void run(usageStatus, async () => {
     diagnostic.value = JSON.stringify({
       schemaVersion: 1, extensionVersion: chrome.runtime.getManifest().version,
       ...totals(await send('usageSummary', undefined), Number(field('usage-range').value)),
     }, null, 2);
-    element('diagnostic-preview').hidden = false;
   });
 });
 element('copy').addEventListener('click', () => {

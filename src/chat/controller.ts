@@ -20,9 +20,13 @@ function localId(rule: ChatRule) {
 
 function relevantFrame(page: URL, frame: URL) {
   if (!isYouTube(page.hostname)) return true;
-  if (frame.pathname === '/live_chat') return true;
-  return window === window.top && ['/watch', '/live'].some(path => page.pathname.startsWith(path)) &&
-    !document.querySelector('iframe[src*="/live_chat"]');
+  if (window === window.top && frame.pathname === '/live_chat') return true;
+  const candidates = Array.from(window.top!.document.querySelectorAll<HTMLIFrameElement>(
+    'iframe#chatframe, ytd-live-chat-frame iframe, iframe[src*="/live_chat"]'));
+  const visible = candidates.find(candidate => candidate.getClientRects().length &&
+    candidate.clientWidth > 10 && candidate.clientHeight > 10 && getComputedStyle(candidate).visibility !== 'hidden');
+  if (window !== window.top) return frame.pathname === '/live_chat' && (!visible || window.frameElement === visible);
+  return ['/watch', '/live'].some(path => page.pathname.startsWith(path)) && !visible;
 }
 
 export function startLiveChat(signal: AbortSignal) {
@@ -46,6 +50,7 @@ export function startLiveChat(signal: AbortSignal) {
   let lastError = '';
   let counted = false;
   let explicitDetection = false;
+  let looking = false;
   let nextScan = 0;
   let nextSync = 0;
   let refreshing: Promise<void> | undefined;
@@ -99,6 +104,7 @@ export function startLiveChat(signal: AbortSignal) {
     language = undefined;
     counted = false;
     explicitDetection = false;
+    looking = false;
     lastError = '';
     nextScan = 0;
     nextSync = 0;
@@ -199,6 +205,7 @@ export function startLiveChat(signal: AbortSignal) {
           if (preparePicker().suggest(candidate)) meter.count('automatic');
         } else if (explicitDetection && !picker) {
           preparePicker();
+          looking = true;
           panel!.show('正在查找弹幕', '还没有找到结构稳定的弹幕。可以等待新消息，也可以直接手动选区。');
           panel!.button('选择弹幕区域', () => picker!.start());
           panel!.button('关闭', () => { explicitDetection = false; picker!.close(); });
@@ -208,9 +215,13 @@ export function startLiveChat(signal: AbortSignal) {
     }
     activityObserver?.disconnect();
     activityObserver = undefined;
+    if (looking) {
+      looking = false;
+      panel?.hide();
+    }
     const { match, result } = selected;
-    const { enabled, modelConfigured, mode, readingLanguage, revision } = snapshot.settings;
-    const signature = JSON.stringify([match.rule, enabled, modelConfigured, mode, readingLanguage, revision]);
+    const { enabled, modelConfigured, mode, readingLanguage, revision, translateEmoji } = snapshot.settings;
+    const signature = JSON.stringify([match.rule, enabled, modelConfigured, mode, readingLanguage, revision, translateEmoji]);
     if (session?.container === result.container && sessionSignature === signature) return;
     session?.close();
     if (snapshot.settings.enabled) {
@@ -239,6 +250,7 @@ export function startLiveChat(signal: AbortSignal) {
     if (!synchronize()) return;
     if (action === 'refresh') { void refresh(true); return; }
     if (action === 'pick') {
+      looking = false;
       meter.count('manualPicker');
       preparePicker().start();
       void refresh();
@@ -259,18 +271,30 @@ export function startLiveChat(signal: AbortSignal) {
       const current = language;
       void current.read().then(preference => {
         if (language !== current) return;
-        preparePicker();
+        looking = false;
+        preparePicker().close();
         const info = current.context();
-        panel!.show('当前直播间', [info.title, info.streamer, lastError].filter(Boolean).join(' · ') ||
-          '设置未来生成回复时默认用的语言。');
+        const format = (code: string | null) => {
+          if (!code) return '回复语言尚未设置';
+          try {
+            const name = new Intl.DisplayNames('zh-CN', { type: 'language' }).of(code);
+            return name === code ? code : name + '（' + code + '）';
+          } catch { return code; }
+        };
+        panel!.show('当前直播间', [info.title, info.streamer, lastError, format(preference?.language ?? null)].filter(Boolean).join(' · '));
         const value = panel!.languageInput(preference?.language ?? null);
         panel!.button('保存语言', () => {
-          const raw = value.value.trim();
-          if (!/^[a-z]{2,8}(?:-[a-z0-9]{2,8})*$/i.test(raw) || raw.length > 48) {
+          let code: string | undefined;
+          try {
+            const input = value.value.trim();
+            [code] = Intl.getCanonicalLocales(input.toLowerCase() === 'jp' ? 'ja' : input);
+          } catch { /* Invalid language tags are handled below. */ }
+          if (!code || code.length > 48) {
             panel!.note('请填写语言代码，例如 ja 或 zh-CN。');
             return;
           }
-          void current.set(raw).then(() => panel?.note('已保存。'), error => panel?.note(String(error.message)));
+          value.value = code;
+          void current.set(code).then(() => panel?.note('已保存。' + format(code)), error => panel?.note(String(error.message)));
         });
         panel!.button('清除记忆', () => { void current.set(null).then(() => { value.value = ''; panel?.note('已清除。'); }); });
         panel!.button('关闭', () => picker!.close());
@@ -278,8 +302,12 @@ export function startLiveChat(signal: AbortSignal) {
     }
   }
 
-  const listener = (message: { pageAction?: string }, sender: chrome.runtime.MessageSender, respond: (value: boolean) => void) => {
+  const listener = (message: { pageAction?: string }, sender: chrome.runtime.MessageSender, respond: (value: boolean | number) => void) => {
     if (sender.id !== chrome.runtime.id || typeof message?.pageAction !== 'string' || !synchronize()) return;
+    if (message.pageAction === 'rank') {
+      respond((session ? 100 : 0) + (frame.pathname === '/live_chat' ? 20 : 0) + (window === window.top ? 2 : 1));
+      return;
+    }
     if (message.pageAction !== 'ping') activate(message.pageAction);
     respond(true);
   };

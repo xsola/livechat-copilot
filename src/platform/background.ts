@@ -1,5 +1,6 @@
 import { createTasks } from '../models/tasks';
 import { ImageInputUnsupportedError } from '../models/openai-compatible';
+import { modelSystemPrompt, promptDefaults, promptTasks, taskInstructions } from '../models/prompts';
 import { resolveRules, decideRule } from '../rules/resolver';
 import { summarizeRules, syncRegistry } from '../rules/registry';
 import { ruleMatches } from '../rules/schema';
@@ -8,12 +9,12 @@ import { hostPattern, isTextOnlyModel, isYouTube, parseEndpoint, parseRegistry, 
 import { editState, readState, type State } from './store';
 import type { RoomPreference } from './store';
 import { captureCandidate } from './capture';
-import { parseCommand, type SiteState } from './messages';
+import { parseCommand, type PromptContext, type SiteState } from './messages';
 
 type Command = NonNullable<ReturnType<typeof parseCommand>>;
 const uiOnly = new Set<Command['kind']>([
   'getSettings', 'saveSettings', 'saveModelSettings', 'saveReadingSettings', 'probeModel', 'syncRegistry', 'usageSummary',
-  'clearUsage', 'removeRule', 'site', 'setSite', 'attach',
+  'clearUsage', 'removeRule', 'site', 'setSite', 'attach', 'pageCommand', 'setTranslateEmoji', 'promptContext', 'savePrompt',
 ]);
 const registryAlarm = 'refresh-community-rules';
 const checksInFlight = new Set<string>();
@@ -66,6 +67,31 @@ function imageModelKey(settings: Settings) {
   return JSON.stringify([settings.model.endpoint, settings.model.model]);
 }
 
+function pageSettings(state: State, origin: string | null) {
+  return {
+    ...state.settings,
+    systemPrompts: { ...state.settings.systemPrompts, ...(origin ? state.sitePrompts[origin] : undefined) },
+  };
+}
+
+async function promptPage(tabId?: number) {
+  if (tabId === undefined) return { origin: null };
+  const tab = await chrome.tabs.get(tabId);
+  return { origin: webUrl(tab.url).origin, title: tab.title };
+}
+
+async function promptContext(page: Awaited<ReturnType<typeof promptPage>>): Promise<PromptContext> {
+  const settings = pageSettings(await readState(), page.origin);
+  const prompts = Object.fromEntries(promptTasks.map(task => {
+    const instruction = settings.systemPrompts[task] ?? promptDefaults[task];
+    return [task, { instruction, system: modelSystemPrompt(taskInstructions(task, settings, instruction)) }];
+  })) as PromptContext['prompts'];
+  return {
+    ...page, prompts, model: settings.model.model,
+    readingLanguage: readingLanguage(settings.readingLanguage, chrome.i18n.getUILanguage()),
+  };
+}
+
 function imageUnavailable(state: State) {
   return isTextOnlyModel(state.settings.model) || state.rejectedVisionModel === imageModelKey(state.settings);
 }
@@ -82,6 +108,19 @@ function refreshPages() {
   void chrome.tabs.query({}).then(tabs => Promise.all(tabs.map(tab =>
     tab.id === undefined ? undefined : chrome.tabs.sendMessage(tab.id, { pageAction: 'refresh' }).catch(() => undefined),
   ))).catch(() => undefined);
+}
+
+async function routePageCommand(tabId: number, action: string) {
+  const frames = await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true }, func: () => true,
+  }).then(results => results.map(result => result.frameId)).catch(() => [0]);
+  const available = await Promise.all(frames.map(async frameId => ({
+    frameId,
+    rank: Number(await chrome.tabs.sendMessage(tabId, { pageAction: 'rank' }, { frameId }).catch(() => 0)),
+  })));
+  const target = available.filter(frame => frame.rank > 0).sort((a, b) => b.rank - a.rank)[0];
+  return Boolean(target && (action === 'ping' || await chrome.tabs.sendMessage(tabId, { pageAction: action },
+    { frameId: target.frameId }).catch(() => false)));
 }
 
 async function attach(tabId: number, page: URL) {
@@ -131,6 +170,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       return {
         settings: {
           enabled, modelConfigured: granted, imageInput: imageUnavailable(state) ? false : state.settings.model.imageInput,
+          translateEmoji: state.settings.translateEmoji,
           autoVision: state.settings.autoVision, revision: state.revision,
           readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()), mode: state.settings.mode,
         },
@@ -158,7 +198,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       if (translations >= 3) throw new Error('The translation provider is busy. New messages will be prioritized.');
       translations++;
       try {
-        return await tasks.translate(await authorizedModel(state.settings), cmd.payload.items);
+        return await tasks.translate(await authorizedModel(pageSettings(state, page.origin)), cmd.payload.items);
       } finally {
         translations--;
       }
@@ -172,7 +212,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       }
       checksInFlight.add(key);
       try {
-        const settings = await authorizedModel(state.settings);
+        const settings = await authorizedModel(pageSettings(state, page.origin));
         const { rect, editorRect, sendRect, html, samples } = cmd.payload;
         const image = await captureCandidate(tab, [rect, editorRect, sendRect].filter(r => r !== undefined));
         if ((await readState()).revision !== state.revision) throw new Error('模型设置已变化，已跳过复核。');
@@ -208,7 +248,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       if (checksInFlight.has(key)) throw new Error('Language identification is already running.');
       checksInFlight.add(key);
       try {
-        const profile = await tasks.roomProfile(await authorizedModel(state.settings), hints, lines);
+        const profile = await tasks.roomProfile(await authorizedModel(pageSettings(state, page.origin)), hints, lines);
         const preference = await saveRoom(key, { language: profile.language, source: 'inferred' }, true);
         return { preference, profile };
       } finally {
@@ -250,6 +290,36 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
         rules: summarizeRules(state), imageUnavailable: imageUnavailable(state),
       };
     }
+    case 'pageCommand':
+      return routePageCommand(cmd.payload.tabId, cmd.payload.action);
+    case 'promptContext':
+      return promptContext(await promptPage(cmd.payload));
+    case 'savePrompt': {
+      const { tabId, origin, task, value } = cmd.payload;
+      const page = await promptPage(tabId);
+      if (page.origin !== origin) throw new Error('直播页面已切换，请从该页重新打开设置。');
+      await editState(state => {
+        const prompts = { ...(origin ? state.sitePrompts[origin] : state.settings.systemPrompts) };
+        if (value === null) delete prompts[task];
+        else prompts[task] = value;
+        if (!origin) return {
+          changes: { settings: { ...state.settings, systemPrompts: prompts }, revision: state.revision + 1 }, result: undefined,
+        };
+        const sitePrompts = { ...state.sitePrompts };
+        if (Object.keys(prompts).length) sitePrompts[origin] = prompts;
+        else delete sitePrompts[origin];
+        return { changes: { sitePrompts, revision: state.revision + 1 }, result: undefined };
+      });
+      refreshPages();
+      return promptContext(page);
+    }
+    case 'setTranslateEmoji':
+      await editState(state => ({
+        changes: { settings: { ...state.settings, translateEmoji: cmd.payload }, revision: state.revision + 1 },
+        result: undefined,
+      }));
+      refreshPages();
+      return;
     case 'saveSettings':
     case 'saveModelSettings':
     case 'saveReadingSettings': {
@@ -323,9 +393,10 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
           result: undefined,
         }));
         refreshPages();
-        return { origin, enabled, youtube } satisfies SiteState;
+        return { origin, enabled, youtube, translateEmoji: (await readState()).settings.translateEmoji } satisfies SiteState;
       }
-      return { origin, enabled: (await readState()).enabledSites.includes(origin), youtube } satisfies SiteState;
+      const state = await readState();
+      return { origin, enabled: state.enabledSites.includes(origin), youtube, translateEmoji: state.settings.translateEmoji } satisfies SiteState;
     }
   }
   throw new Error('Unsupported settings command.');

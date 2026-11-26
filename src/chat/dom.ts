@@ -1,6 +1,6 @@
 import type { ChatRule } from '../rules/schema';
 
-export interface DOMMessage { node: Element; body: Element; text: string }
+export interface DOMMessage { node: Element; body: Element; text: string; withoutEmoji: string }
 export interface RuleTest { container: Element; messages: DOMMessage[]; rejected: boolean }
 
 export function query(root: ParentNode, selector: string) {
@@ -24,33 +24,60 @@ export function matches(node: Element, selector?: string) {
   try { return node.matches(selector); } catch { return false; }
 }
 
-export function messageText(root: Element) {
-  let text = '';
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const emoji = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u20e3]/u;
+const normalizeText = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 600);
+
+export function stripEmoji(text: string) {
+  if (!emoji.test(text)) return text;
+  return Array.from(graphemes.segment(text), ({ segment }) => emoji.test(segment) ? '' : segment).join('');
+}
+
+function messageParts(root: Element) {
+  let full = '';
+  let words = '';
+  let hasImage = false;
   const visit = (node: Node) => {
     if (node.nodeType === 3) {
-      text += node.nodeValue ?? '';
+      full += node.nodeValue ?? '';
+      words += node.nodeValue ?? '';
       return;
     }
     if (node.nodeType !== 1) return;
     const element = node as Element;
     if (element.matches('[data-livechat-copilot], script, style, [hidden], [aria-hidden="true"]')) return;
-    if (element.localName === 'img') {
-      text += ' ' + (element.getAttribute('alt') ?? '') + ' ';
+    if (element.matches('img, [role="img"][aria-label]')) {
+      hasImage = true;
+      const label = (element.getAttribute('alt') ?? element.getAttribute('aria-label') ?? '').trim();
+      full += ' ' + label.replace(/^:_?([^:\s]{1,120}):$/, '$1') + ' ';
+      words += ' ';
       return;
     }
-    if (element.localName === 'br') text += ' ';
+    if (element.localName === 'br') {
+      full += ' ';
+      words += ' ';
+    }
     for (const child of element.childNodes) visit(child);
   };
   visit(root);
-  return text.replace(/\s+/g, ' ').trim().slice(0, 600);
+  const stripped = stripEmoji(words);
+  const remaining = normalizeText(stripped);
+  return {
+    text: normalizeText(full), hasImage,
+    withoutEmoji: (hasImage || stripped !== words) && !/[\p{L}\p{N}]/u.test(remaining) ? '' : remaining,
+  };
+}
+
+export function messageText(root: Element) {
+  return messageParts(root).text;
 }
 
 export function extractRow(node: Element, rule: ChatRule): DOMMessage | undefined {
   if (matches(node, rule.ignore) || node.closest('[data-livechat-copilot]')) return;
   const body = rule.body ? query(node, rule.body) : node;
   if (!body) return;
-  const text = messageText(body);
-  if (text) return { node, body, text };
+  const { text, withoutEmoji, hasImage } = messageParts(body);
+  if (text || hasImage) return { node, body, text, withoutEmoji };
 }
 
 export function testRule(root: ParentNode, rule: ChatRule, container?: Element | null): RuleTest | undefined {

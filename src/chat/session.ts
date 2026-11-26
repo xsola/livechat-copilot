@@ -43,7 +43,7 @@ export class ChatSession {
   constructor(
     readonly match: RuleMatch,
     readonly container: Element,
-    settings: PageSettings,
+    private readonly settings: PageSettings,
     private readonly language: RoomLanguage,
     private readonly meter: PageMeter,
     private readonly error: (message: string) => void,
@@ -65,13 +65,16 @@ export class ChatSession {
   private ingest(messages: DOMMessage[], mode: PageSettings['mode']) {
     for (const dom of messages) {
       const previous = this.rows.get(dom.node);
-      if (previous?.text === dom.text && previous.dom.body === dom.body) continue;
+      const text = this.payload(dom);
+      if (previous?.text === text && previous.dom.body === dom.body) continue;
       this.renderer.remove(dom.node);
-      const row: Row = { id: this.stamp + '-' + ++this.sequence, dom, text: dom.text, observedAt: Date.now() };
+      const row: Row = { id: this.stamp + '-' + ++this.sequence, dom, text, observedAt: Date.now() };
       this.rows.set(dom.node, row);
-      this.recent.push({ id: row.id, text: row.text, observedAt: row.observedAt });
-      if (this.recent.length > 120) this.recent.shift();
-      if (!this.scheduler) continue;
+      if (dom.withoutEmoji) {
+        this.recent.push({ id: row.id, text: dom.withoutEmoji, observedAt: row.observedAt });
+        if (this.recent.length > 120) this.recent.shift();
+      }
+      if (!this.scheduler || !text) continue;
       if (mode === 'manual') this.renderer.action(dom, () => this.submit(row, true));
       else this.submit(row);
     }
@@ -81,12 +84,16 @@ export class ChatSession {
     }
   }
 
+  private payload(dom: DOMMessage) {
+    return this.settings.translateEmoji ? dom.text : dom.withoutEmoji;
+  }
+
   private submit(row: Row, manual = false) {
     const { dom } = row;
     const available = () => {
       const latest = extractRow(dom.node, this.match.rule);
       return !this.closed && this.isCurrent() && dom.node.isConnected && this.container.contains(dom.node) &&
-        this.rows.get(dom.node) === row && latest?.body === dom.body && latest.text === row.text;
+        this.rows.get(dom.node) === row && latest?.body === dom.body && this.payload(latest) === row.text;
     };
     this.scheduler?.add({
       id: row.id, text: row.text, available, manual,

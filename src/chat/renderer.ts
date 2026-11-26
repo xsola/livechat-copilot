@@ -2,6 +2,10 @@ import type { DOMMessage } from './dom';
 
 export class Renderer {
   private readonly annotations = new Map<Element, HTMLElement>();
+  private readonly alignments = new Map<Element, () => void>();
+  private readonly resize = new ResizeObserver(entries => {
+    for (const { target } of entries) this.alignments.get(target)?.();
+  });
 
   private display(message: DOMMessage, text: string, action?: () => void) {
     this.remove(message.node);
@@ -23,6 +27,21 @@ export class Renderer {
     if (message.body === message.node) message.body.append(annotation);
     else message.body.after(annotation);
     this.annotations.set(message.node, annotation);
+    if (!action && message.body !== message.node) {
+      const align = () => {
+        const original = message.body.getClientRects()[0];
+        if (!original?.width) return;
+        const rtl = getComputedStyle(message.body).direction === 'rtl';
+        const current = annotation.getBoundingClientRect();
+        const previous = Number.parseFloat(annotation.style.marginInlineStart) || 0;
+        const delta = rtl ? current.right - original.right : original.left - current.left;
+        const offset = Math.max(0, Math.round((previous + delta) * 2) / 2);
+        if (Math.abs(offset - previous) >= 0.5) annotation.style.marginInlineStart = offset + 'px';
+      };
+      this.alignments.set(message.node, align);
+      this.resize.observe(message.node);
+      align();
+    }
   }
 
   show(message: DOMMessage, text: string) {
@@ -36,10 +55,13 @@ export class Renderer {
   remove(row: Element) {
     this.annotations.get(row)?.remove();
     this.annotations.delete(row);
+    if (this.alignments.delete(row)) this.resize.unobserve(row);
   }
 
   clear() {
     for (const node of this.annotations.values()) node.remove();
     this.annotations.clear();
+    this.resize.disconnect();
+    this.alignments.clear();
   }
 }

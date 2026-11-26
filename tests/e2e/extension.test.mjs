@@ -100,6 +100,7 @@ function tabId(options, url) {
 }
 
 function action(options, tab, pageAction) {
+  if (pageAction !== 'refresh') return command(options, 'pageCommand', { tabId: tab, action: pageAction });
   return options.evaluate(({ tab, pageAction }) => chrome.tabs.sendMessage(tab, { pageAction }), { tab, pageAction });
 }
 
@@ -148,7 +149,7 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await popup.goto(origin + '/popup.html');
   await popup.locator('#enabled').check();
   await popup.getByText('已启用。').waitFor();
-  await chat.getByText('译：Amazing comeback 🎉').waitFor({ timeout: 7500 }).catch(async error => {
+  await chat.getByText('译：Amazing comeback', { exact: true }).waitFor({ timeout: 7500 }).catch(async error => {
     const contents = await chat.locator('#items').innerText();
     const usage = await command(options, 'usageSummary');
     throw new Error(JSON.stringify({ contents, usage, requestLog, pageErrors }), { cause: error });
@@ -157,6 +158,19 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   assert.ok(requestLog.every(body => !JSON.stringify(body).includes('OriginalAuthor')));
 
   const rows = chat.locator('#items yt-live-chat-text-message-renderer');
+  assert.ok(requestLog.every(body => !/🎉|ファイトー|🇯🇵/u.test(JSON.stringify(body))));
+  assert.equal(await rows.nth(2).locator('[data-lcc-kind="translation"]').count(), 0);
+  const alignment = await rows.first().evaluate(row => {
+    const original = row.querySelector('#message').getClientRects()[0];
+    const translated = row.querySelector('[data-lcc-kind="translation"]').getBoundingClientRect();
+    return { offset: Math.abs(original.left - translated.left), below: translated.top > original.top };
+  });
+  assert.ok(alignment.offset < 1 && alignment.below, JSON.stringify(alignment));
+  await popup.getByRole('checkbox', { name: '翻译表情（所有直播间）' }).check();
+  await chat.getByText('译：Amazing comeback 🎉', { exact: true }).waitFor();
+  await chat.getByText('译：ファイトー 🇯🇵', { exact: true }).waitFor();
+  await popup.getByRole('checkbox', { name: '翻译表情（所有直播间）' }).uncheck();
+  await chat.getByText('译：Amazing comeback', { exact: true }).waitFor();
   await rows.first().locator('#message').evaluate(node => { node.textContent = 'Slow original'; });
   await until(() => requestLog.some(body => JSON.stringify(body).includes('Slow original')));
   await rows.first().locator('#message').evaluate(node => { node.textContent = 'Fresh content'; });
@@ -188,16 +202,17 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await chat.getByText('译：New tournament').waitFor();
   await live.reload();
   await chat.getByText('译：New tournament').waitFor();
-  assert.equal(await chat.getByText('译：Amazing comeback 🎉').count(), 0);
+  assert.equal(await chat.getByText('译：Amazing comeback', { exact: true }).count(), 0);
 
   await action(options, tab, 'room');
-  await chat.locator('input[placeholder="ja / en / zh-CN"]').fill('ja');
+  await chat.locator('input[placeholder="ja / en / zh-CN"]').fill('jp');
   await chat.getByRole('button', { name: '保存语言' }).click();
-  await chat.getByText('已保存。', { exact: true }).waitFor();
+  await chat.getByText('已保存。日语（ja）', { exact: true }).waitFor();
   await live.reload();
   await chat.getByText('译：New tournament').waitFor();
   await action(options, tab, 'room');
   await until(() => chat.locator('input[placeholder="ja / en / zh-CN"]').inputValue({ timeout: 1500 }).then(value => value === 'ja'));
+  assert.equal(await live.frameLocator('#duplicate-chat').getByText('当前直播间', { exact: true }).count(), 0);
   await live.evaluate(() => {
     history.pushState(null, '', '/watch?v=two');
     document.querySelector('#channel-name a').setAttribute('href', '/@another-channel');
@@ -209,10 +224,14 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   assert.equal(await chat.locator('input[placeholder="ja / en / zh-CN"]').inputValue(), '');
   await until(async () => (await command(options, 'usageSummary')).some(day => day.page.manualPicker && day.page.rendered));
   await options.locator('#export').click();
-  await options.locator('#diagnostic').waitFor();
+  await until(async () => Boolean(await options.locator('#diagnostic').inputValue()));
   const summary = await options.locator('#diagnostic').inputValue();
   assert.match(summary, /"vision"/);
   assert.doesNotMatch(summary, /Fresh content|OriginalAuthor|youtube\.com|127\.0\.0\.1/);
+  await options.getByRole('button', { name: '收起诊断摘要' }).click();
+  assert.equal(await options.locator('#diagnostic').isVisible(), false);
+  await options.getByRole('button', { name: '预览诊断摘要' }).click();
+  assert.equal(await options.locator('#diagnostic').isVisible(), true);
 });
 
 test('new site candidates and a staged community rule roll back to the last usable version', { timeout: 65_000 }, async t => {
@@ -275,10 +294,38 @@ test('an endpoint that rejects images disables later visual checks while text tr
   assert.equal(requestLog.filter(body => Array.isArray(body.messages[1].content) &&
     JSON.parse(body.messages[1].content[0].text).test !== 'image-capability').length, 1);
   await command(options, 'setSite', { tabId: tab, enabled: true, origin: 'https://www.youtube.com' });
-  await chat.getByText('译：Amazing comeback 🎉').waitFor();
+  await chat.getByText('译：Amazing comeback', { exact: true }).waitFor();
   await options.reload();
   await options.getByText('当前模型不支持图片输入', { exact: false }).waitFor();
   assert.equal(await options.locator('#auto-vision').isDisabled(), true);
+});
+
+test('advanced prompts show the real system message and apply a website override to translation', { timeout: 35_000 }, async t => {
+  const { context, origin, options, requestLog } = await boot(t);
+  const live = await context.newPage();
+  await live.goto('https://www.youtube.com/watch?v=one');
+  const tab = await tabId(options, live.url());
+  await options.goto(origin + '/options.html?fromTab=' + tab);
+  await options.getByText('高级设置 · 模型提示词').click();
+  await options.getByText('当前网站 https://www.youtube.com', { exact: false }).waitFor();
+  const instructions = options.locator('#system-instruction');
+  assert.equal(await instructions.getAttribute('readonly'), '');
+  assert.match(await options.locator('#system-preview').inputValue(), /targetLanguage/);
+  await options.getByRole('button', { name: '解锁编辑' }).click();
+  await instructions.fill('Use the custom website terminology.');
+  await options.getByRole('button', { name: '保存任务指令' }).click();
+  await options.getByText('任务指令已保存。').waitFor();
+  const expected = await options.locator('#system-preview').inputValue();
+  assert.match(expected, /Use the custom website terminology/);
+  await command(options, 'setSite', { tabId: tab, enabled: true, origin: 'https://www.youtube.com' });
+  const chat = live.frameLocator('#chatframe');
+  await chat.getByText('译：Amazing comeback', { exact: true }).waitFor();
+  assert.ok(requestLog.some(body => body.messages[0].content === expected));
+  const global = await command(options, 'promptContext');
+  assert.doesNotMatch(global.prompts.translation.system, /custom website terminology/);
+  await options.getByRole('button', { name: '恢复继承设置' }).click();
+  await options.getByText('已恢复。').waitFor();
+  assert.equal(await options.locator('#system-preview').inputValue(), global.prompts.translation.system);
 });
 
 test('settings test unsaved model fields and keep the browser language as the default', { timeout: 40_000 }, async t => {

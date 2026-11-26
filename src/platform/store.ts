@@ -2,6 +2,7 @@ import { defaults, settingsSchema, type Settings } from './config';
 import type { ChatRule } from '../rules/schema';
 import type { CommunityRules } from '../rules/resolver';
 import type { DailyUsage } from '../usage/usage';
+import type { PromptOverrides } from '../models/prompts';
 
 export interface RoomPreference {
   language: string | null;
@@ -17,6 +18,7 @@ export interface State {
   roomPreferences: Record<string, RoomPreference>;
   usage: DailyUsage[];
   rejectedVisionModel: string | null;
+  sitePrompts: Record<string, PromptOverrides>;
 }
 
 const initial: State = {
@@ -28,6 +30,7 @@ const initial: State = {
   roomPreferences: {},
   usage: [],
   rejectedVisionModel: null,
+  sitePrompts: {},
 };
 
 let pendingWrites: Promise<unknown> = Promise.resolve();

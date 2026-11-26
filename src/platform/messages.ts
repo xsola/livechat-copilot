@@ -4,6 +4,7 @@ import { chatRule, type RuleMatch } from '../rules/schema';
 import { pageCounter, type DailyUsage } from '../usage/usage';
 import type { RoomPreference } from './store';
 import type { ModelProbe, RoomProfile, TranslationItem, VisionAdvice } from '../models/tasks';
+import { promptTasks, type PromptTask } from '../models/prompts';
 
 const id = z.string().min(1).max(100);
 const roomKey = z.string().min(1).max(300);
@@ -43,6 +44,18 @@ const payloads = {
   clearUsage: z.undefined(),
   removeRule: id,
   site: z.number().int().nonnegative(),
+  pageCommand: z.object({
+    tabId: z.number().int().nonnegative(),
+    action: z.enum(['ping', 'pick', 'detect', 'room', 'initial-review']),
+  }),
+  setTranslateEmoji: z.boolean(),
+  promptContext: z.number().int().nonnegative().optional(),
+  savePrompt: z.object({
+    tabId: z.number().int().nonnegative().optional(),
+    origin: z.string().max(350).nullable(),
+    task: z.enum(promptTasks),
+    value: z.string().trim().min(1).max(4000).nullable(),
+  }),
   setSite: z.object({ tabId: z.number().int().nonnegative(), enabled: z.boolean(), origin: z.string().max(350) }),
   attach: z.number().int().nonnegative(),
   getRoom: roomKey,
@@ -60,8 +73,15 @@ const payloads = {
 };
 
 export interface PageSnapshot { settings: PageSettings; rules: RuleMatch[] }
-export interface SiteState { enabled: boolean; origin: string; youtube: boolean }
+export interface SiteState { enabled: boolean; origin: string; youtube: boolean; translateEmoji: boolean }
 export interface RuleSummary { local: Array<{ id: string; host: string; path?: string }>; active: number; staged: number }
+export interface PromptContext {
+  origin: string | null;
+  title?: string;
+  readingLanguage: string;
+  model: string;
+  prompts: Record<PromptTask, { instruction: string; system: string }>;
+}
 
 interface Results {
   snapshot: PageSnapshot;
@@ -80,6 +100,10 @@ interface Results {
   clearUsage: void;
   removeRule: void;
   site: SiteState;
+  pageCommand: boolean;
+  setTranslateEmoji: void;
+  promptContext: PromptContext;
+  savePrompt: PromptContext;
   setSite: SiteState;
   attach: void;
   getRoom: RoomPreference | null;

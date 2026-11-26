@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { promptOverrides } from '../models/prompts';
 
 export const defaultPrompt = 'Use natural, concise wording. Preserve game terms, links, emojis and placeholders. Do not add explanations.';
 export const languageCode = z.string().regex(/^[a-z]{2,8}(?:-[a-z0-9]{2,8})*$/i).max(48);
@@ -18,9 +19,11 @@ export const settingsSchema = z.strictObject({
   prompt: z.string().max(2000),
   registryUrl: z.string().max(500),
   autoVision: z.boolean().default(false),
+  translateEmoji: z.boolean().default(false),
+  systemPrompts: promptOverrides.default({}),
 });
 export type Settings = z.infer<typeof settingsSchema>;
-export type PageSettings = Pick<Settings, 'readingLanguage' | 'mode'> & {
+export type PageSettings = Pick<Settings, 'readingLanguage' | 'mode' | 'translateEmoji'> & {
   enabled: boolean;
   modelConfigured: boolean;
   imageInput: boolean | null;
@@ -40,6 +43,8 @@ export const defaults: Settings = {
   prompt: defaultPrompt,
   registryUrl: '',
   autoVision: false,
+  translateEmoji: false,
+  systemPrompts: {},
 };
 
 export function readingLanguage(preference: string, browserLocale: string) {
