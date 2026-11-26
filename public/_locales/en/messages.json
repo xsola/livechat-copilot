@@ -1,0 +1,130 @@
+{
+  "uiLocale": {
+    "message": "en"
+  },
+  "scopeTitle": {
+    "message": "Translation scope"
+  },
+  "scopeLabel": {
+    "message": "Apply to"
+  },
+  "roomScope": {
+    "message": "This stream"
+  },
+  "siteScope": {
+    "message": "All streams on this site"
+  },
+  "enableScope": {
+    "message": "Enable chat translation for this scope"
+  },
+  "followSite": {
+    "message": "Use site setting"
+  },
+  "translationPreferences": {
+    "message": "Translation preferences"
+  },
+  "targetLabel": {
+    "message": "Translate into"
+  },
+  "skipDefault": {
+    "message": "Skip messages already in the target language"
+  },
+  "skipLanguage": {
+    "message": "Skip messages already in $LANGUAGE$",
+    "placeholders": {
+      "language": {
+        "content": "$1"
+      }
+    }
+  },
+  "emojiLabel": {
+    "message": "Translate emoji (all streams)"
+  },
+  "modelPrivacy": {
+    "message": "Messages that need translation go to the model you configure."
+  },
+  "chatPanel": {
+    "message": "Chat region"
+  },
+  "detectChat": {
+    "message": "Detect chat region"
+  },
+  "pickChat": {
+    "message": "Select chat region manually"
+  },
+  "settings": {
+    "message": "Open settings"
+  },
+  "loadingPage": {
+    "message": "Reading current page…"
+  },
+  "enabledHere": {
+    "message": "Translation is enabled here using “$SCOPE$”.",
+    "placeholders": {
+      "scope": {
+        "content": "$1"
+      }
+    }
+  },
+  "disabledHere": {
+    "message": "Translation is disabled here using “$SCOPE$”.",
+    "placeholders": {
+      "scope": {
+        "content": "$1"
+      }
+    }
+  },
+  "legacyScope": {
+    "message": "This page still uses a saved page setting. Changing it will save a stream setting."
+  },
+  "pageScope": {
+    "message": "This site has no detected stream identifier. The setting is saved for this chat link."
+  },
+  "genericError": {
+    "message": "Something went wrong."
+  },
+  "needsAccess": {
+    "message": "Allow access to this site to detect chat."
+  },
+  "connecting": {
+    "message": "Connecting to the current stream…"
+  },
+  "startingDetection": {
+    "message": "Starting chat detection…"
+  },
+  "startingPicker": {
+    "message": "Opening manual selection…"
+  },
+  "noChatPage": {
+    "message": "Open or expand live chat and try again."
+  },
+  "openStreamFirst": {
+    "message": "Open a live stream first."
+  },
+  "scopeFollowed": {
+    "message": "This stream now uses the site setting."
+  },
+  "scopeEnabled": {
+    "message": "Enabled."
+  },
+  "scopeDisabled": {
+    "message": "Disabled."
+  },
+  "browserTarget": {
+    "message": "Browser language ($LANGUAGE$)",
+    "placeholders": {
+      "language": {
+        "content": "$1"
+      }
+    }
+  },
+  "saveTarget": {
+    "message": "Save"
+  },
+  "targetSaved": {
+    "message": "Target language saved."
+  },
+  "targetInvalid": {
+    "message": "Enter a language name or code, such as Japanese or ja. Clear the field to use the browser language."
+  }
+}

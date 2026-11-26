@@ -1,14 +1,20 @@
 import '../../platform/ui.css';
 import { hostPattern } from '../../platform/config';
+import { localizePage, message } from '../../platform/i18n';
 import { send, type SiteState } from '../../platform/messages';
 import { effectiveScope, scopeValue, type TranslationScope } from '../../platform/translation-scope';
-import { languageName } from '../../rooms/language-input';
+import { languageName, normalizeLanguage } from '../../rooms/language-input';
+
+localizePage(document);
+const uiLocale = document.documentElement.lang;
 
 const siteLabel = document.querySelector<HTMLParagraphElement>('#site')!;
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const emoji = document.querySelector<HTMLInputElement>('#translate-emoji')!;
 const skipReading = document.querySelector<HTMLInputElement>('#skip-reading')!;
-const targetLanguage = document.querySelector<HTMLSelectElement>('#target-language')!;
+const targetLanguage = document.querySelector<HTMLInputElement>('#target-language')!;
+const targetForm = document.querySelector<HTMLFormElement>('#target-language-form')!;
+const saveTarget = document.querySelector<HTMLButtonElement>('#save-target-language')!;
 const skipLabel = document.getElementById('skip-label')!;
 const scope = document.querySelector<HTMLSelectElement>('#scope')!;
 const resetScope = document.querySelector<HTMLButtonElement>('#reset-scope')!;
@@ -16,10 +22,9 @@ const scopeHelp = document.getElementById('scope-help')!;
 const status = document.querySelector<HTMLParagraphElement>('#status')!;
 const actions = ['detect', 'pick'] as const;
 const actionButtons = actions.map(id => document.querySelector<HTMLButtonElement>('#' + id)!);
-const translationLanguages = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko', 'es', 'fr', 'de', 'pt', 'ru', 'it', 'vi', 'th', 'id', 'ar'];
 let tabId: number;
 let site: SiteState;
-const scopeNames: Record<TranslationScope, string> = { room: '当前直播间', site: '本站所有直播间' };
+const scopeNames: Record<TranslationScope, string> = { room: message('roomScope'), site: message('siteScope') };
 
 function showScope() {
   const selected = scope.value as TranslationScope;
@@ -31,12 +36,10 @@ function showScope() {
   resetScope.hidden = selected === 'site' || target.value === null;
   resetScope.disabled = false;
   const current = effectiveScope(site.scopes);
-  const active = current ? '当前页面按「' + scopeNames[current.scope] + '」设置' +
-    (current.value ? '启用翻译。' : '关闭翻译。') : '';
+  const active = current ? message(current.value ? 'enabledHere' : 'disabledHere', scopeNames[current.scope]) : '';
   const detail = target.usesLegacyPageSetting
-    ? ' 当前页面沿用旧版保存的翻译开关。修改后将按直播间保存。'
-    : target.usesPageLink ? ' 本站当前没有可识别的房间标识，按这条聊天链接保存。' : '';
-  scopeHelp.textContent = active + detail;
+    ? message('legacyScope') : target.usesPageLink ? message('pageScope') : '';
+  scopeHelp.textContent = [active, detail].filter(Boolean).join(' ');
 }
 
 async function run(operation: () => Promise<void>) {
@@ -44,14 +47,14 @@ async function run(operation: () => Promise<void>) {
   try {
     await operation();
   } catch (error) {
-    status.textContent = error instanceof Error ? error.message : '操作失败。';
+    status.textContent = error instanceof Error ? error.message : message('genericError');
   }
 }
 
 async function prepareSite() {
   if (!site.youtube) {
     const allowed = await chrome.permissions.request({ origins: [hostPattern(new URL(site.origin))] });
-    if (!allowed) throw new Error('需要访问当前网站才能识别弹幕。');
+    if (!allowed) throw new Error(message('needsAccess'));
     if (!await send('pageCommand', { tabId, action: 'ping' }).catch(() => false)) {
       await send('attach', tabId);
     }
@@ -61,16 +64,16 @@ async function prepareSite() {
 async function command(pageAction: typeof actions[number]) {
   for (const button of actionButtons) button.disabled = true;
   status.classList.add('busy');
-  status.textContent = '正在连接当前直播页面…';
+  status.textContent = message('connecting');
   try {
     await prepareSite();
-    status.textContent = pageAction === 'detect' ? '正在启动弹幕识别…' : '正在打开手动选区…';
+    status.textContent = message(pageAction === 'detect' ? 'startingDetection' : 'startingPicker');
     let received = await send('pageCommand', { tabId, action: pageAction });
     if (!received) {
       await send('attach', tabId);
       received = await send('pageCommand', { tabId, action: pageAction });
     }
-    if (!received) throw new Error('没有找到活动的聊天页面，请打开或展开直播聊天。');
+    if (!received) throw new Error(message('noChatPage'));
     window.close();
   } finally {
     status.classList.remove('busy');
@@ -79,13 +82,13 @@ async function command(pageAction: typeof actions[number]) {
 }
 
 function showTargetLanguage() {
-  skipLabel.textContent = '自动翻译时跳过已是' + languageName(site.readingLanguage) + '的弹幕';
-  targetLanguage.value = site.targetLanguage;
+  skipLabel.textContent = message('skipLanguage', languageName(site.readingLanguage, uiLocale));
+  targetLanguage.value = site.targetLanguage ? languageName(site.targetLanguage, uiLocale) : '';
 }
 
 void run(async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id === undefined) throw new Error('请先打开直播页面。');
+  if (tab?.id === undefined) throw new Error(message('openStreamFirst'));
   tabId = tab.id;
   site = await send('site', tabId);
   siteLabel.textContent = new URL(site.origin).hostname;
@@ -98,11 +101,9 @@ void run(async () => {
   emoji.disabled = false;
   skipReading.checked = site.skipReadingLanguage;
   skipReading.disabled = false;
-  targetLanguage.add(new Option('跟随浏览器（' + languageName(site.browserLanguage) + '）', ''));
-  for (const code of new Set([...translationLanguages, site.targetLanguage].filter(Boolean))) {
-    targetLanguage.add(new Option(languageName(code), code));
-  }
+  targetLanguage.placeholder = message('browserTarget', languageName(site.browserLanguage, uiLocale));
   targetLanguage.disabled = false;
+  saveTarget.disabled = false;
   showTargetLanguage();
   for (const action of actions) {
     const button = document.querySelector<HTMLButtonElement>('#' + action)!;
@@ -125,7 +126,7 @@ function setScope(checked: boolean | null) {
   void run(async () => {
     if (checked) await prepareSite();
     site = await send('setSite', { tabId, enabled: checked, origin: site.origin, scope: target.scope, key: target.key });
-    status.textContent = checked === null ? '当前直播间已跟随全站设置。' : checked ? '已启用。' : '已关闭。';
+    status.textContent = message(checked === null ? 'scopeFollowed' : checked ? 'scopeEnabled' : 'scopeDisabled');
     if (checked && effectiveScope(site.scopes)?.value) {
       void send('pageCommand', { tabId, action: 'initial-review' }).catch(() => undefined);
     }
@@ -135,13 +136,29 @@ function setScope(checked: boolean | null) {
 enabled.addEventListener('change', () => setScope(enabled.checked));
 resetScope.addEventListener('click', () => setScope(null));
 
-targetLanguage.addEventListener('change', () => {
-  const preference = targetLanguage.value;
+targetLanguage.addEventListener('input', () => targetLanguage.removeAttribute('aria-invalid'));
+
+targetForm.addEventListener('submit', event => {
+  event.preventDefault();
+  const input = targetLanguage.value.trim();
+  const current = site.targetLanguage ? languageName(site.targetLanguage, uiLocale) : '';
+  const preference = input === current ? site.targetLanguage : input ? normalizeLanguage(input, site.browserLanguage) : '';
+  if (preference === undefined) {
+    status.textContent = message('targetInvalid');
+    targetLanguage.setAttribute('aria-invalid', 'true');
+    targetLanguage.focus();
+    return;
+  }
   targetLanguage.disabled = true;
+  saveTarget.disabled = true;
   void run(async () => {
-    site.readingLanguage = await send('setTargetLanguage', preference);
-    site.targetLanguage = preference;
-  }).finally(() => { showTargetLanguage(); targetLanguage.disabled = false; });
+    if (preference !== site.targetLanguage) {
+      site.readingLanguage = await send('setTargetLanguage', preference);
+      site.targetLanguage = preference;
+    }
+    showTargetLanguage();
+    status.textContent = message('targetSaved');
+  }).finally(() => { targetLanguage.disabled = false; saveTarget.disabled = false; });
 });
 
 skipReading.addEventListener('change', () => {

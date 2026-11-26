@@ -1,0 +1,130 @@
+{
+  "uiLocale": {
+    "message": "zh-CN"
+  },
+  "scopeTitle": {
+    "message": "翻译范围"
+  },
+  "scopeLabel": {
+    "message": "应用范围"
+  },
+  "roomScope": {
+    "message": "当前直播间"
+  },
+  "siteScope": {
+    "message": "本站所有直播间"
+  },
+  "enableScope": {
+    "message": "在所选范围启用弹幕翻译"
+  },
+  "followSite": {
+    "message": "跟随全站设置"
+  },
+  "translationPreferences": {
+    "message": "翻译偏好"
+  },
+  "targetLabel": {
+    "message": "翻译成"
+  },
+  "skipDefault": {
+    "message": "自动翻译时跳过已是目标语言的弹幕"
+  },
+  "skipLanguage": {
+    "message": "自动翻译时跳过已是$LANGUAGE$的弹幕",
+    "placeholders": {
+      "language": {
+        "content": "$1"
+      }
+    }
+  },
+  "emojiLabel": {
+    "message": "翻译表情（所有直播间）"
+  },
+  "modelPrivacy": {
+    "message": "需要翻译的弹幕正文会发送给你配置的模型。"
+  },
+  "chatPanel": {
+    "message": "弹幕区"
+  },
+  "detectChat": {
+    "message": "自动识别弹幕区"
+  },
+  "pickChat": {
+    "message": "手动选择弹幕区"
+  },
+  "settings": {
+    "message": "打开设置"
+  },
+  "loadingPage": {
+    "message": "读取当前页面…"
+  },
+  "enabledHere": {
+    "message": "当前页面按「$SCOPE$」设置启用翻译。",
+    "placeholders": {
+      "scope": {
+        "content": "$1"
+      }
+    }
+  },
+  "disabledHere": {
+    "message": "当前页面按「$SCOPE$」设置关闭翻译。",
+    "placeholders": {
+      "scope": {
+        "content": "$1"
+      }
+    }
+  },
+  "legacyScope": {
+    "message": "当前页面沿用旧版保存的翻译开关。修改后将按直播间保存。"
+  },
+  "pageScope": {
+    "message": "本站当前没有可识别的房间标识，按这条聊天链接保存。"
+  },
+  "genericError": {
+    "message": "操作失败。"
+  },
+  "needsAccess": {
+    "message": "需要访问当前网站才能识别弹幕。"
+  },
+  "connecting": {
+    "message": "正在连接当前直播页面…"
+  },
+  "startingDetection": {
+    "message": "正在启动弹幕识别…"
+  },
+  "startingPicker": {
+    "message": "正在打开手动选区…"
+  },
+  "noChatPage": {
+    "message": "没有找到活动的聊天页面，请打开或展开直播聊天。"
+  },
+  "openStreamFirst": {
+    "message": "请先打开直播页面。"
+  },
+  "scopeFollowed": {
+    "message": "当前直播间已跟随全站设置。"
+  },
+  "scopeEnabled": {
+    "message": "已启用。"
+  },
+  "scopeDisabled": {
+    "message": "已关闭。"
+  },
+  "browserTarget": {
+    "message": "跟随浏览器（$LANGUAGE$）",
+    "placeholders": {
+      "language": {
+        "content": "$1"
+      }
+    }
+  },
+  "saveTarget": {
+    "message": "保存"
+  },
+  "targetSaved": {
+    "message": "已保存目标语言。"
+  },
+  "targetInvalid": {
+    "message": "请输入语言名称或代码，例如日语或 ja。清空后可跟随浏览器语言。"
+  }
+}

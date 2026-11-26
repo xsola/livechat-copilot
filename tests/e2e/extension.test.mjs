@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 
 const fixture = name => readFile(new URL('../fixtures/' + name, import.meta.url), 'utf8');
 
-async function boot(t) {
+async function boot(t, locale = 'zh-CN') {
   const requestLog = [];
   const server = createServer(async (request, response) => {
     if (request.method === 'GET') {
@@ -67,8 +67,8 @@ async function boot(t) {
   manifest.host_permissions.push('<all_urls>');
   await writeFile(manifestPath, JSON.stringify(manifest));
   context = await chromium.launchPersistentContext(path.join(root, 'profile'), {
-    channel: 'chromium', headless: true, viewport: { width: 1050, height: 900 },
-    args: ['--disable-extensions-except=' + unpacked, '--load-extension=' + unpacked],
+    channel: 'chromium', headless: true, viewport: { width: 1050, height: 900 }, locale,
+    args: ['--disable-extensions-except=' + unpacked, '--load-extension=' + unpacked, '--lang=' + locale],
   });
   const [starting] = context.serviceWorkers();
   const worker = starting ?? await context.waitForEvent('serviceworker', { timeout: 15_000 });
@@ -128,6 +128,7 @@ test('the visible dist directory loads without modifying the manifest', { timeou
   const unpacked = path.resolve('dist/chrome-mv3');
   const manifest = JSON.parse(await readFile(path.join(unpacked, 'manifest.json'), 'utf8'));
   assert.equal(manifest.manifest_version, 3);
+  assert.equal(manifest.default_locale, 'en');
   assert.equal(manifest.host_permissions.includes('<all_urls>'), false);
   assert.equal(manifest.action.default_icon['16'], 'icons/icon-16.png');
   assert.equal((await readFile(path.join(unpacked, manifest.icons['128']))).readUInt32BE(16), 128);
@@ -667,8 +668,9 @@ test('the popup offers only room and site scopes and skips matching languages', 
   assert.equal(requestLog.some(request => JSON.stringify(request.messages[1].content).includes(english)), false);
 
   const target = popup.locator('#target-language');
-  assert.equal(await target.inputValue(), 'en');
-  await target.selectOption('ja');
+  assert.equal(await target.inputValue(), '英语');
+  await target.fill('日本語');
+  await target.press('Enter');
   await popup.getByText('自动翻译时跳过已是日语的弹幕', { exact: true }).waitFor();
   await chat.getByText('译：' + english, { exact: true }).waitFor();
   await chat.getByText('译：' + japanese, { exact: true }).waitFor({ state: 'detached' });
@@ -676,9 +678,13 @@ test('the popup offers only room and site scopes and skips matching languages', 
     JSON.parse(messages[1].content).targetLanguage === 'ja' && messages[1].content.includes(english)));
   await popup.locator('#skip-reading').uncheck();
   await chat.getByText('译：' + japanese, { exact: true }).waitFor();
-  await target.selectOption('');
+  await target.fill('');
+  await popup.getByRole('button', { name: '保存', exact: true }).click();
   await until(async () => (await command(options, 'getSettings')).settings.readingLanguage === '');
-  await target.selectOption('en');
+  assert.match(await target.getAttribute('placeholder'), /^跟随浏览器（.+）$/);
+  await target.fill('en');
+  await target.press('Enter');
+  await until(async () => (await command(options, 'getSettings')).settings.readingLanguage === 'en');
   await popup.locator('#skip-reading').check();
 
   await popup.locator('#scope').selectOption('site');
@@ -716,4 +722,29 @@ test('the popup offers only room and site scopes and skips matching languages', 
   await chat.getByRole('button', { name: '保存语言' }).click();
   await chat.getByText('已保存。日语（ja）', { exact: true }).waitFor();
   assert.ok(requestLog.some(request => JSON.stringify(request.messages[1].content).includes('我想用日本主播们直播常用的那门语言')));
+});
+
+test('the popup uses English fallback and accepts language names and codes outside a menu', { timeout: 30_000 }, async t => {
+  const { context, options, origin } = await boot(t, 'fr-FR');
+  const live = await context.newPage();
+  await live.goto('https://www.youtube.com/watch?v=one');
+  const popup = await context.newPage();
+  await live.bringToFront();
+  await popup.goto(origin + '/popup.html');
+  const target = popup.getByRole('textbox', { name: 'Translate into' });
+  await target.waitFor();
+  assert.equal(await popup.locator('html').getAttribute('lang'), 'en');
+  assert.equal(await target.inputValue(), '');
+  assert.match(await target.getAttribute('placeholder'), /^Browser language \(.+\)$/);
+  await target.fill('not a language');
+  await target.press('Enter');
+  assert.equal(await target.getAttribute('aria-invalid'), 'true');
+  await target.fill('Ελληνικά');
+  await target.press('Enter');
+  await popup.getByText('Target language saved.', { exact: true }).waitFor();
+  assert.equal((await command(options, 'getSettings')).settings.readingLanguage, 'el');
+  assert.equal(await target.inputValue(), 'Greek');
+  await target.fill('pt-BR');
+  await popup.getByRole('button', { name: 'Save', exact: true }).click();
+  await until(async () => (await command(options, 'getSettings')).settings.readingLanguage === 'pt-BR');
 });

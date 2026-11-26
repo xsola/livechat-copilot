@@ -1,32 +1,35 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LiveChat Copilot</title></head>
 <body class="popup">
   <main>
-    <header class="brand"><img src="/icons/logo.svg" width="34" height="34" alt=""><div><h1>LiveChat Copilot</h1><small id="site" class="secondary">读取当前页面…</small></div></header>
+    <header class="brand"><img src="/icons/logo.svg" width="34" height="34" alt=""><div><h1>LiveChat Copilot</h1><small id="site" class="secondary" data-i18n="loadingPage">Reading current page…</small></div></header>
     <div class="popup-group">
-      <h2>翻译范围</h2>
-      <label class="scope-label">应用范围 <select id="scope" disabled></select></label>
-      <label class="check"><input type="checkbox" id="enabled" disabled> 在所选范围启用弹幕翻译</label>
+      <h2 data-i18n="scopeTitle">Translation scope</h2>
+      <label class="scope-label"><span data-i18n="scopeLabel">Apply to</span> <select id="scope" disabled></select></label>
+      <label class="check"><input type="checkbox" id="enabled" disabled> <span data-i18n="enableScope">Enable chat translation for this scope</span></label>
       <p id="scope-help" class="secondary"></p>
-      <button type="button" id="reset-scope" hidden>跟随全站设置</button>
+      <button type="button" id="reset-scope" data-i18n="followSite" hidden>Use site setting</button>
     </div>
     <div class="popup-group">
-      <h2>翻译偏好</h2>
-      <label class="scope-label">翻译成 <select id="target-language" disabled></select></label>
-      <label class="check"><input type="checkbox" id="skip-reading" disabled> <span id="skip-label">自动翻译时跳过已是目标语言的弹幕</span></label>
-      <label class="check"><input type="checkbox" id="translate-emoji" disabled> 翻译表情（所有直播间）</label>
-      <p class="secondary">需要翻译的弹幕正文会发送给你配置的模型。</p>
+      <h2 data-i18n="translationPreferences">Translation preferences</h2>
+      <form id="target-language-form" class="target-language-form">
+        <label><span data-i18n="targetLabel">Translate into</span><input id="target-language" maxlength="80" spellcheck="false" autocomplete="off" disabled></label>
+        <button id="save-target-language" type="submit" data-i18n="saveTarget" disabled>Save</button>
+      </form>
+      <label class="check"><input type="checkbox" id="skip-reading" disabled> <span id="skip-label" data-i18n="skipDefault">Skip messages already in the target language</span></label>
+      <label class="check"><input type="checkbox" id="translate-emoji" disabled> <span data-i18n="emojiLabel">Translate emoji (all streams)</span></label>
+      <p class="secondary" data-i18n="modelPrivacy">Messages that need translation go to the model you configure.</p>
     </div>
     <div class="popup-group">
-      <h2>弹幕区</h2>
+      <h2 data-i18n="chatPanel">Chat region</h2>
       <div class="actions">
-        <button type="button" class="primary" id="detect" disabled>自动识别弹幕区</button>
-        <button type="button" id="pick" disabled>手动选择弹幕区</button>
+        <button type="button" class="primary" id="detect" data-i18n="detectChat" disabled>Detect chat region</button>
+        <button type="button" id="pick" data-i18n="pickChat" disabled>Select chat region manually</button>
       </div>
     </div>
     <div class="popup-group popup-footer actions">
-      <button type="button" id="options">打开设置</button>
+      <button type="button" id="options" data-i18n="settings">Open settings</button>
     </div>
     <p id="status" role="status"></p>
   </main>

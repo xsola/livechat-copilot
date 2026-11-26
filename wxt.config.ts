@@ -8,6 +8,7 @@ export default defineConfig({
   manifestVersion: 3,
   manifest: {
     name: 'LiveChat Copilot',
+    default_locale: 'en',
     description: 'Translate live chat in place and adapt new sites with a visual rule picker.',
     minimum_chrome_version: '120',
     icons,
