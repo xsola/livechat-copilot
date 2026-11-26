@@ -140,11 +140,13 @@ export class Picker {
   private queueReview(candidate: Candidate) {
     const settings = this.settings();
     if (!settings?.imageInput) {
-      this.panel.note('当前模型不支持或未启用图片输入，已跳过图像复核。');
+      this.panel.note(settings?.imageInput === false
+        ? '当前模型不支持图片输入，已跳过截图核验。'
+        : '模型的图片能力尚未确认，可在设置中测试。');
       return;
     }
     if (!settings.autoVision || !settings.modelConfigured) {
-      this.panel.note(settings.autoVision ? '请先在设置中授权模型服务。' : '自动图像复核未开启。');
+      this.panel.note(settings.autoVision ? '请先在设置中授权模型服务。' : '截图核验未开启。');
       return;
     }
     const key = JSON.stringify([settings.revision, candidate.rule]);

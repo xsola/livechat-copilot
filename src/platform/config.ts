@@ -6,8 +6,8 @@ export const modelConfig = z.strictObject({
   endpoint: z.string().max(500),
   model: z.string().trim().min(1).max(150),
   apiKey: z.string().max(2048),
-  imageInput: z.boolean(),
-  jsonMode: z.boolean(),
+  imageInput: z.boolean().nullable().default(null),
+  jsonMode: z.boolean().optional(), // accepted from older saved configurations
 });
 export type ModelConfig = z.infer<typeof modelConfig>;
 
@@ -23,7 +23,7 @@ export type Settings = z.infer<typeof settingsSchema>;
 export type PageSettings = Pick<Settings, 'readingLanguage' | 'mode'> & {
   enabled: boolean;
   modelConfigured: boolean;
-  imageInput: boolean;
+  imageInput: boolean | null;
   autoVision: boolean;
   revision: number;
 };
@@ -33,8 +33,7 @@ export const defaults: Settings = {
     endpoint: 'https://api.deepseek.com',
     model: 'deepseek-flash',
     apiKey: '',
-    imageInput: true,
-    jsonMode: true,
+    imageInput: null,
   },
   readingLanguage: '',
   mode: 'batch',

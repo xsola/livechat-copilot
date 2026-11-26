@@ -16,6 +16,7 @@ interface RequestOptions {
   data: object;
   image?: string;
   maxTokens: number;
+  jsonMode: boolean;
 }
 
 export interface ModelUsage {
@@ -31,9 +32,11 @@ export class ModelError extends Error {
 
 export class ImageInputUnsupportedError extends ModelError {
   constructor() {
-    super('当前模型接口不支持图片输入，已禁用自动图像复核。');
+    super('当前模型接口不支持图片输入，已停用截图核验。');
   }
 }
+
+export class JsonModeUnsupportedError extends ModelError {}
 
 export async function complete(config: ModelConfig, options: RequestOptions, request = fetch) {
   const url = parseEndpoint(config.endpoint);
@@ -52,7 +55,7 @@ export async function complete(config: ModelConfig, options: RequestOptions, req
       },
     ],
     max_tokens: options.maxTokens,
-    ...(config.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+    ...(options.jsonMode ? { response_format: { type: 'json_object' } } : {}),
     ...(url.origin === 'https://api.deepseek.com' ? { thinking: { type: 'disabled' } } : {}),
   };
   const headers = new Headers({ 'Content-Type': 'application/json' });
@@ -72,17 +75,23 @@ export async function complete(config: ModelConfig, options: RequestOptions, req
     throw new ModelError('Model endpoint could not be reached within the request deadline.');
   }
   if (!response.ok) {
-    if (options.image && [400, 415, 422].includes(response.status)) {
+    if ((options.image || options.jsonMode) && [400, 415, 422].includes(response.status)) {
       const detail = z.object({ error: z.object({
-        code: z.string().nullish(),
+        code: z.union([z.string(), z.number()]).nullish(),
         message: z.string().nullish(),
+        param: z.string().nullish(),
       }) }).safeParse(await readJson(response, 16_000).catch(() => undefined));
       if (detail.success) {
-        const { code, message } = detail.data.error;
+        const { code, message, param } = detail.data.error;
         const unsupportedCode = /^(?:image_input_unsupported|unsupported_image_input|vision_not_supported|text_only_model)$/i;
         const unsupportedMessage = /(?:does not support|cannot accept) (?:image|vision)|(?:image input|vision).{0,35}(?:unsupported by|not supported by) .{0,20}model|only (?:supports? )?text|text.only model|不支持.{0,20}(?:图片|图像)输入/i;
-        if ((code && unsupportedCode.test(code)) || (message && unsupportedMessage.test(message))) {
+        if (options.image && (unsupportedCode.test(String(code ?? '')) || unsupportedMessage.test(message ?? ''))) {
           throw new ImageInputUnsupportedError();
+        }
+        const formatMessage = /(?:response[ _-]format|json[ _-](?:mode|object)).{0,60}(?:not supported|unsupported|not allowed|unknown|must be)|(?:unsupported|unknown|unrecognized|not support).{0,60}(?:response[ _-]format|json[ _-](?:mode|object))/i;
+        if (options.jsonMode && (code === 'unsupported_response_format' ||
+          (param === 'response_format' && code === 'unsupported_parameter') || formatMessage.test(message ?? ''))) {
+          throw new JsonModeUnsupportedError('Model endpoint does not support the requested JSON mode.');
         }
       }
     } else {

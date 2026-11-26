@@ -29,14 +29,11 @@
             <p class="secondary" id="test-detail">测试使用一条示例弹幕和一张合成图片。</p>
           </aside>
         </div>
-        <details class="model-details">
-          <summary>图像复核与兼容性</summary>
-          <label class="check"><input id="image" type="checkbox"> 此模型支持图片输入</label>
-          <label class="check"><input id="auto-vision" type="checkbox"> 自动复核新识别的候选规则</label>
+        <div class="region-review">
+          <label class="check"><input id="auto-vision" type="checkbox" disabled aria-describedby="review-help image-status"> 用截图核验新弹幕区</label>
+          <p class="secondary" id="review-help">首次识别或重新选区时，将候选区域裁图和少量弹幕发给你配置的模型，帮你确认选区。已保存的规则直接复用。</p>
           <p class="secondary" id="image-status" role="status"></p>
-          <p class="secondary">开启后会向所选模型发送候选弹幕区裁图、可见且未输入草稿的发送区裁图和少量正文。</p>
-          <label class="check"><input id="json" type="checkbox"> 请求 JSON 模式</label>
-        </details>
+        </div>
       </section>
       <section>
         <h2>翻译偏好</h2>

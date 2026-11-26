@@ -1,5 +1,5 @@
 import '../../platform/ui.css';
-import { defaultPrompt, hostPattern, isTextOnlyModel, languageCode, modelConfig, parseEndpoint, type Settings } from '../../platform/config';
+import { defaultPrompt, hostPattern, isTextOnlyModel, languageCode, modelConfig, parseEndpoint, type ModelConfig, type Settings } from '../../platform/config';
 import { send, type RuleSummary } from '../../platform/messages';
 import type { DailyUsage, ModelTask, PageCounter, TaskUsage } from '../../usage/usage';
 
@@ -9,8 +9,10 @@ const status = element('status');
 const usageStatus = element('usage-status');
 const diagnostic = document.querySelector<HTMLTextAreaElement>('#diagnostic')!;
 let keyOrigin = '';
-let refusedImageKey = '';
 let browserLanguage = '';
+let savedModel: ModelConfig | undefined;
+let savedImageUnavailable = false;
+let testedImage: { key: string; supported: boolean } | undefined;
 
 const modeHelp: Record<Settings['mode'], string> = {
   batch: '短暂等候，把几条弹幕合并成一次请求，减少请求次数。',
@@ -25,20 +27,37 @@ function updateReadingHelp() {
     : '留空时跟随浏览器界面语言。';
 }
 
-function selectedImageKey() {
-  return JSON.stringify([field('endpoint').value.trim(), field('model').value.trim()]);
+function modelFields() {
+  return { endpoint: field('endpoint').value.trim(), model: field('model').value.trim(), apiKey: field('key').value.trim() };
+}
+
+function modelKey({ endpoint, model, apiKey }: ReturnType<typeof modelFields>) {
+  return JSON.stringify([endpoint, model, apiKey]);
+}
+
+function imageCapability() {
+  const fields = modelFields();
+  if (isTextOnlyModel(fields)) return false;
+  const key = modelKey(fields);
+  const matchesSaved = savedModel && key === modelKey(savedModel);
+  if (matchesSaved && savedImageUnavailable) return false;
+  if (testedImage?.key === key) return testedImage.supported;
+  return matchesSaved ? savedModel?.imageInput ?? null : null;
 }
 
 function updateVisionFields() {
-  const textOnly = isTextOnlyModel({ endpoint: field('endpoint').value.trim(), model: field('model').value.trim() });
-  const unavailable = refusedImageKey === selectedImageKey();
-  field('image').disabled = textOnly;
-  if (textOnly) field('image').checked = false;
-  field('auto-vision').disabled = textOnly || unavailable || !field('image').checked;
-  if (field('auto-vision').disabled) field('auto-vision').checked = false;
-  element('image-status').textContent = unavailable || textOnly
-    ? '当前模型接口不支持图片输入，已禁用自动图像复核。'
-    : field('image').checked ? '' : '图片输入未启用，已禁用自动图像复核。';
+  const supported = imageCapability();
+  field('auto-vision').disabled = supported !== true;
+  if (supported !== true) field('auto-vision').checked = false;
+  element('image-status').textContent = supported === false
+    ? '当前模型不支持图片输入，截图核验不可用。'
+    : supported === null ? '请先测试当前模型，确认支持图片后即可开启。' : '';
+}
+
+function rememberCapability(model: ModelConfig, imageUnavailable: boolean) {
+  savedModel = model;
+  savedImageUnavailable = imageUnavailable;
+  updateVisionFields();
 }
 
 async function run(target: HTMLElement, operation: () => Promise<void>) {
@@ -118,15 +137,12 @@ void run(status, async () => {
   keyOrigin = parseEndpoint(settings.model.endpoint).origin;
   field('model').value = settings.model.model;
   field('key').value = settings.model.apiKey;
-  field('image').checked = settings.model.imageInput;
   field('auto-vision').checked = settings.autoVision;
-  field('json').checked = settings.model.jsonMode;
   field('language').value = settings.readingLanguage;
   field('language').placeholder = locale;
   field('mode').value = settings.mode;
   field('prompt').value = settings.prompt;
-  if (imageUnavailable) refusedImageKey = selectedImageKey();
-  updateVisionFields();
+  rememberCapability(settings.model, imageUnavailable);
   updateReadingHelp();
   showRules(rules);
 });
@@ -139,25 +155,21 @@ field('endpoint').addEventListener('change', () => {
     // The form validates the completed endpoint before saving.
   }
 });
-for (const id of ['image', 'endpoint', 'model']) field(id).addEventListener('input', updateVisionFields);
-for (const id of ['endpoint', 'model', 'key', 'json', 'language']) {
+for (const id of ['endpoint', 'model', 'key']) field(id).addEventListener('input', updateVisionFields);
+for (const id of ['endpoint', 'model', 'key', 'language']) {
   field(id).addEventListener('input', () => renderProbe('待测试', '待测试', '—', '测试使用一条示例弹幕和一张合成图片。'));
 }
 field('mode').addEventListener('change', updateReadingHelp);
 window.addEventListener('focus', () => {
   void send('getSettings', undefined).then(({ settings, imageUnavailable, rules }) => {
-    refusedImageKey = imageUnavailable ? JSON.stringify([settings.model.endpoint, settings.model.model]) : '';
-    updateVisionFields();
+    rememberCapability(settings.model, imageUnavailable);
     showRules(rules);
   }).catch(() => undefined);
 });
 void run(usageStatus, showUsage);
 
 function currentModel() {
-  return modelConfig.parse({
-    endpoint: field('endpoint').value.trim(), model: field('model').value.trim(), apiKey: field('key').value.trim(),
-    imageInput: field('image').checked, jsonMode: field('json').checked,
-  });
+  return modelConfig.parse({ ...modelFields(), imageInput: imageCapability() });
 }
 
 function currentLanguage() {
@@ -192,9 +204,8 @@ document.querySelector<HTMLFormElement>('#settings')!.addEventListener('submit',
       throw new Error('未获得访问模型服务的权限。');
     }
     await send('saveModelSettings', { model, autoVision });
-    const { imageUnavailable } = await send('getSettings', undefined);
-    refusedImageKey = imageUnavailable ? selectedImageKey() : '';
-    updateVisionFields();
+    const { settings, imageUnavailable } = await send('getSettings', undefined);
+    rememberCapability(settings.model, imageUnavailable);
     status.textContent = '已保存。';
   });
 });
@@ -212,19 +223,18 @@ testButton.addEventListener('click', () => {
         throw new Error('未获得访问模型服务的权限。');
       }
       const result = await send('probeModel', { model, readingLanguage: language });
-      if (JSON.stringify(model) !== JSON.stringify(currentModel()) || language !== currentLanguage()) return;
+      const key = modelKey(model);
+      if (key !== modelKey(modelFields()) || language !== field('language').value.trim()) return;
       const image = { supported: '支持', unsupported: '不支持', unverified: '未确认', skipped: '未测试' }[result.image];
       renderProbe(result.translationMs === null ? '测试失败' : '连接正常', image,
         result.translationMs === null ? '—' : result.translationMs + ' ms',
         result.connectionError ?? (result.image === 'unverified'
           ? '文字翻译可用，但图片测试未返回可验证的结果。'
           : '单条示例请求耗时，不含弹幕排队。'));
-      if (result.image === 'supported') {
-        refusedImageKey = '';
-        field('image').checked = true;
-      } else if (result.image === 'unsupported') {
-        refusedImageKey = selectedImageKey();
-        field('image').checked = false;
+      if (result.image === 'supported' || result.image === 'unsupported') {
+        const supported = result.image === 'supported';
+        testedImage = { key, supported };
+        if (savedModel && key === modelKey(savedModel)) savedImageUnavailable = !supported;
       }
       updateVisionFields();
       void showUsage().catch(() => undefined);

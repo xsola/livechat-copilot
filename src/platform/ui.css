@@ -43,8 +43,7 @@ button:disabled { cursor: default; opacity: .6; }
 .model-test dl div { display: flex; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid light-dark(#d9e1f6, #414d69); }
 .model-test dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .model-test p { margin-bottom: 0; }
-.model-details { margin-top: 14px; padding-top: 12px; border-top: 1px solid light-dark(#d3ddeb, #445269); }
-.model-details summary { cursor: pointer; }
+.region-review { margin-top: 14px; padding-top: 8px; border-top: 1px solid light-dark(#d3ddeb, #445269); }
 #status, #usage-status, #test-detail { overflow-wrap: anywhere; }
 #status:empty, #image-status:empty, #preferences-status:empty { display: none; }
 @media (max-width: 640px) {

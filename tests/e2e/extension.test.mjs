@@ -21,7 +21,8 @@ async function boot(t) {
     requestLog.push(value);
     const content = value.messages[1].content;
     const command = JSON.parse(Array.isArray(content) ? content[0].text : content);
-    if (Array.isArray(content) && value.model === 'test-text-only') {
+    if (Array.isArray(content) && (value.model === 'test-text-only' ||
+      (value.model === 'test-runtime-image-rejection' && command.test !== 'image-capability'))) {
       response.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({
         error: { message: 'This model does not support image input.', code: 'image_input_unsupported' },
       }));
@@ -162,7 +163,8 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await chat.getByText('译：Fresh content').waitFor();
   assert.equal(await chat.getByText('译：Slow original').count(), 0);
 
-  await options.getByText('图像复核与兼容性', { exact: true }).click();
+  await options.getByRole('button', { name: '测试当前模型' }).click();
+  await options.getByText('支持', { exact: true }).waitFor();
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -252,8 +254,9 @@ test('new site candidates and a staged community rule roll back to the last usab
 
 test('an endpoint that rejects images disables later visual checks while text translation still works', { timeout: 45_000 }, async t => {
   const { context, options, requestLog } = await boot(t);
-  await options.locator('#model').fill('test-text-only');
-  await options.getByText('图像复核与兼容性', { exact: true }).click();
+  await options.locator('#model').fill('test-runtime-image-rejection');
+  await options.getByRole('button', { name: '测试当前模型' }).click();
+  await options.getByText('支持', { exact: true }).waitFor();
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -264,17 +267,17 @@ test('an endpoint that rejects images disables later visual checks while text tr
   await chat.getByText('Amazing comeback').waitFor();
   const tab = await tabId(options, live.url());
   await action(options, tab, 'detect');
-  await chat.getByText('当前模型接口不支持图片输入，已禁用自动图像复核。').waitFor();
+  await chat.getByText('当前模型接口不支持图片输入，已停用截图核验。').waitFor();
   assert.equal((await command(options, 'getSettings')).imageUnavailable, true);
   await live.reload();
   await action(options, tab, 'detect');
-  await chat.getByText('当前模型不支持或未启用图片输入，已跳过图像复核。').waitFor();
-  assert.equal(requestLog.filter(body => Array.isArray(body.messages[1].content)).length, 1);
+  await chat.getByText('当前模型不支持图片输入，已跳过截图核验。').waitFor();
+  assert.equal(requestLog.filter(body => Array.isArray(body.messages[1].content) &&
+    JSON.parse(body.messages[1].content[0].text).test !== 'image-capability').length, 1);
   await command(options, 'setSite', { tabId: tab, enabled: true, origin: 'https://www.youtube.com' });
   await chat.getByText('译：Amazing comeback 🎉').waitFor();
   await options.reload();
-  await options.getByText('图像复核与兼容性', { exact: true }).click();
-  await options.getByText('当前模型接口不支持图片输入', { exact: false }).waitFor();
+  await options.getByText('当前模型不支持图片输入', { exact: false }).waitFor();
   assert.equal(await options.locator('#auto-vision').isDisabled(), true);
 });
 
@@ -286,10 +289,13 @@ test('settings test unsaved model fields and keep the browser language as the de
   assert.equal(browserLanguage, locale);
   assert.equal(await options.locator('#language').getAttribute('placeholder'), locale);
   assert.equal(await options.getByRole('heading', { name: '社区规则' }).count(), 0);
+  assert.equal(await options.getByRole('checkbox').count(), 1);
+  assert.equal(await options.locator('#auto-vision').isDisabled(), true);
   await options.locator('#model').fill('unsaved-draft-model');
   await options.getByRole('button', { name: '测试当前模型' }).click();
   await options.getByText('连接正常', { exact: true }).waitFor();
   assert.equal(await options.locator('#test-image').innerText(), '支持');
+  assert.equal(await options.locator('#auto-vision').isEnabled(), true);
   assert.match(await options.locator('#test-latency').innerText(), /^\d+ ms$/);
   assert.equal((await command(options, 'getSettings')).settings.model.model, 'test-model');
   assert.equal(requestLog.length, 2);
@@ -298,6 +304,7 @@ test('settings test unsaved model fields and keep the browser language as the de
   await options.locator('#model').fill('test-text-only');
   await options.getByRole('button', { name: '测试当前模型' }).click();
   await options.getByText('不支持', { exact: true }).waitFor();
+  assert.equal(await options.locator('#auto-vision').isDisabled(), true);
   assert.equal(await options.locator('#test-connection').innerText(), '连接正常');
   await options.locator('#language').fill('ja');
   await options.locator('#mode').selectOption('single');

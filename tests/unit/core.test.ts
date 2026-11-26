@@ -91,6 +91,23 @@ test('an empty visual result spends at most one request', async () => {
   assert.equal(calls, 1);
 });
 
+test('JSON mode is automatic and a provider rejecting the format uses validated prompt output', async () => {
+  const formats: unknown[] = [];
+  const tasks = createTasks(async () => undefined, async (_url, options) => {
+    const body = JSON.parse(String(options?.body));
+    formats.push(body.response_format);
+    if (body.response_format) {
+      return Response.json({ error: { message: 'Unknown parameter: response_format' } }, { status: 400 });
+    }
+    return Response.json({ choices: [{ message: { content: '{"translations":[{"id":"a","text":"text"}]}' } }] });
+  });
+  const input = [{ id: 'a', text: 'OK' }];
+  const settings = { ...defaults, model: { ...defaults.model, jsonMode: false } };
+  assert.deepEqual(await tasks.translate(settings, input), [{ id: 'a', text: 'text' }]);
+  assert.deepEqual(await tasks.translate(settings, input), [{ id: 'a', text: 'text' }]);
+  assert.deepEqual(formats, [{ type: 'json_object' }, undefined, undefined]);
+});
+
 test('scheduler invalidates stale results and reuses identical text within a batch and in its cache', async () => {
   const calls: Array<Array<{ id: string; text: string }>> = [];
   const received: string[] = [];

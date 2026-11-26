@@ -130,7 +130,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       const granted = await chrome.permissions.contains({ origins: [hostPattern(parseEndpoint(state.settings.model.endpoint))] });
       return {
         settings: {
-          enabled, modelConfigured: granted, imageInput: state.settings.model.imageInput && !imageUnavailable(state),
+          enabled, modelConfigured: granted, imageInput: imageUnavailable(state) ? false : state.settings.model.imageInput,
           autoVision: state.settings.autoVision, revision: state.revision,
           readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()), mode: state.settings.mode,
         },
@@ -166,7 +166,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
     case 'verify': {
       const key = 'vision:' + tab.id;
       if (checksInFlight.has(key)) throw new Error('Image verification is already running for this tab.');
-      if (!state.settings.autoVision) throw new Error('自动图像复核未开启。');
+      if (!state.settings.autoVision) throw new Error('截图核验未开启。');
       if (!state.settings.model.imageInput || imageUnavailable(state)) {
         throw new ImageInputUnsupportedError();
       }
@@ -279,16 +279,23 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
       const { settings } = await readState();
       const probeSettings = await authorizedModel({ ...settings, ...cmd.payload });
       const result = await tasks.probe(probeSettings);
-      if (result.image === 'supported') {
-        const cleared = await editState(state => {
+      if (result.image === 'supported' || result.image === 'unsupported') {
+        const supportsImages = result.image === 'supported';
+        const updated = await editState(state => {
           const model = state.settings.model;
           const tested = probeSettings.model;
           const matchesSaved = model.endpoint === tested.endpoint && model.model === tested.model &&
-            model.apiKey === tested.apiKey && model.jsonMode === tested.jsonMode;
-          const clear = matchesSaved && state.rejectedVisionModel === imageModelKey(probeSettings);
-          return { changes: clear ? { rejectedVisionModel: null } : {}, result: clear };
+            model.apiKey === tested.apiKey;
+          if (!matchesSaved) return { changes: {}, result: false };
+          return {
+            changes: {
+              settings: { ...state.settings, model: { ...model, imageInput: supportsImages } },
+              rejectedVisionModel: supportsImages ? null : imageModelKey(probeSettings),
+            },
+            result: true,
+          };
         });
-        if (cleared) refreshPages();
+        if (updated) refreshPages();
       }
       return result;
     }
