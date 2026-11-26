@@ -102,7 +102,7 @@ export function invalidateSelector(rule: ChatRule) {
 
 export function stableSelector(node: Element) {
   const tag = node.localName;
-  for (const attr of ['data-testid', 'data-role', 'role']) {
+  for (const attr of ['data-a-target', 'data-test-selector', 'data-testid', 'data-role', 'role']) {
     const value = node.getAttribute(attr);
     if (value && /^[\w.-]{1,64}$/.test(value)) return tag + '[' + attr + '="' + value + '"]';
   }

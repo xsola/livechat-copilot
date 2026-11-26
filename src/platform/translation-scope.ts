@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isYouTube } from './config';
+import { isTwitch, twitchChannel } from '../chat/twitch';
 
 export const scopeType = z.enum(['room', 'site']);
 export type TranslationScope = z.infer<typeof scopeType>;
@@ -13,6 +14,10 @@ export interface ScopeOption {
 }
 
 function roomIdentity(page: URL) {
+  if (isTwitch(page.hostname)) {
+    const channel = twitchChannel(page);
+    return channel ? 'twitch:' + channel : null;
+  }
   if (isYouTube(page.hostname)) {
     const video = page.searchParams.get('v') ?? /^\/live\/([\w-]+)/.exec(page.pathname)?.[1];
     return video && /^[\w-]{1,100}$/.test(video) ? 'youtube:' + video : null;

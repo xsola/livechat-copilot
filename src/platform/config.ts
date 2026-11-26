@@ -21,6 +21,7 @@ export const settingsSchema = z.strictObject({
   autoVision: z.boolean().default(false),
   translateEmoji: z.boolean().default(false),
   skipReadingLanguage: z.boolean().default(true),
+  preferredScope: z.enum(['room', 'site']).nullable().default(null),
   systemPrompts: promptOverrides.default({}),
 });
 export type Settings = z.infer<typeof settingsSchema>;
@@ -46,6 +47,7 @@ export const defaults: Settings = {
   autoVision: false,
   translateEmoji: false,
   skipReadingLanguage: true,
+  preferredScope: null,
   systemPrompts: {},
 };
 

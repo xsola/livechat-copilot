@@ -30,7 +30,9 @@ async function boot(t) {
     }
     const items = command.items ?? [];
     if (items.some(item => item.text === 'Slow original')) await new Promise(resolve => setTimeout(resolve, 900));
-    const output = command.test === 'image-capability' ? { color: 'blue' }
+    if (command.candidates) await new Promise(resolve => setTimeout(resolve, 650));
+    const output = command.candidates ? { candidateId: command.candidates[0].id, reason: 'Image matches the sample rows.' }
+      : command.test === 'image-capability' ? { color: 'blue' }
       : Array.isArray(content) ? { verdict: 'likely-chat', reason: 'Synthetic region confirmed.',
         composerVerdict: command.sample.editorImage ? 'likely-composer' : 'unlikely-composer' }
       : items.length ? { translations: items.map(({ id, text }) => ({ id, text: '译：' + text })) }
@@ -74,6 +76,11 @@ async function boot(t) {
     contentType: 'text/html',
     body: route.request().url().includes('/live_chat?') ? messages : program,
   }));
+  const twitch = await fixture('twitch-chat.html');
+  await context.route('https://www.twitch.tv/**', route => {
+    const { pathname } = new URL(route.request().url());
+    return route.fulfill({ contentType: 'text/html', body: pathname === '/demochannel' ? twitch : '<main>Browse Twitch</main>' });
+  });
   const options = await context.newPage();
   await options.goto(origin + '/options.html');
   await options.locator('#model').waitFor();
@@ -221,13 +228,13 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await options.getByText('已保存。', { exact: true }).waitFor();
   await live.bringToFront();
   await popup.getByRole('button', { name: '手动选择弹幕区' }).click();
-  await chat.getByText('移动鼠标高亮元素', { exact: false }).waitFor();
+  await chat.getByText('点击包含多条弹幕的列表', { exact: false }).waitFor();
   await chat.getByText('New tournament', { exact: true }).hover();
   await live.keyboard.press('ArrowUp');
   await live.keyboard.press('ArrowUp');
   await live.keyboard.press('Enter');
   await chat.getByRole('button', { name: '保存并启用规则' }).waitFor();
-  await chat.getByRole('button', { name: '选择正文', exact: true }).click();
+  await chat.getByRole('button', { name: '点一条弹幕正文', exact: true }).click();
   await chat.getByText('New tournament', { exact: true }).hover();
   await chat.getByText('New tournament', { exact: true }).click();
   await chat.getByRole('button', { name: '保存并启用规则' }).waitFor();
@@ -312,6 +319,87 @@ test('new site candidates and a staged community rule roll back to the last usab
   assert.equal((await command(options, 'syncRegistry')).staged, 0);
   await live.reload();
   await live.getByText('译：New tournament', { exact: true }).waitFor();
+});
+
+test('Twitch finds nested chat, keeps the chosen scope, and leaves no picker on the homepage', { timeout: 45_000 }, async t => {
+  const { context, options, origin } = await boot(t);
+  const live = await context.newPage();
+  let popup;
+  const openPopup = async () => {
+    if (!popup || popup.isClosed()) popup = await context.newPage();
+    await live.bringToFront();
+    await popup.goto(origin + '/popup.html');
+    await popup.locator('#scope option').first().waitFor({ state: 'attached' });
+  };
+  await live.goto('https://www.twitch.tv/emptychannel');
+  await openPopup();
+  await popup.locator('#scope').selectOption('room');
+  await popup.getByRole('button', { name: '自动识别弹幕区' }).click();
+  await live.getByText('正在识别弹幕区', { exact: true }).waitFor();
+  await live.getByText('未找到弹幕区', { exact: true }).waitFor();
+  await openPopup();
+  assert.equal(await popup.locator('#scope').inputValue(), 'room');
+  assert.equal(await popup.locator('#enabled').isChecked(), false);
+  await live.goto('https://www.twitch.tv/demochannel');
+  await openPopup();
+  await popup.locator('#enabled').check();
+  await popup.getByText('已启用。', { exact: true }).waitFor();
+  await live.getByText('译：Fantastic comeback!', { exact: true }).waitFor();
+  const tab = await tabId(options, live.url());
+  await popup.getByRole('button', { name: '自动识别弹幕区' }).click();
+  const panel = live.getByRole('region', { name: 'LiveChat Copilot' });
+  await panel.getByText('已识别弹幕', { exact: true }).waitFor();
+  await panel.getByText('Fantastic comeback!', { exact: true }).waitFor();
+  assert.equal(await panel.getByText('LIVE', { exact: true }).count(), 0);
+  await panel.getByRole('button', { name: '点一条弹幕正文' }).click();
+  await live.getByText('Fantastic', { exact: true }).click();
+  await panel.getByText('核对弹幕样本', { exact: true }).waitFor();
+  await panel.getByText('What a game!', { exact: true }).waitFor();
+  await panel.getByRole('button', { name: '关闭', exact: true }).click();
+  await panel.waitFor({ state: 'hidden' });
+
+  await action(options, tab, 'pick');
+  await live.getByText('Fantastic', { exact: true }).hover();
+  await live.locator('[data-lcc-kind="panel"] .hover').waitFor();
+  await live.evaluate(() => history.pushState(null, '', '/'));
+  await live.locator('[data-lcc-kind="panel"]').waitFor({ state: 'detached' });
+  assert.equal(await action(options, tab, 'pick'), false);
+  assert.equal(await live.locator('[data-lcc-kind="panel"]').count(), 0);
+  await openPopup();
+  assert.equal(await popup.locator('#enabled').isChecked(), false);
+});
+
+test('the vision model sees bounded candidate samples while automatic detection displays progress', { timeout: 45_000 }, async t => {
+  const { context, options, requestLog, origin, local } = await boot(t);
+  await options.getByRole('button', { name: '测试当前模型' }).click();
+  await options.getByText('支持', { exact: true }).waitFor();
+  await options.locator('#auto-vision').check();
+  await options.getByRole('button', { name: '保存并授权' }).click();
+  await options.getByText('已保存。', { exact: true }).waitFor();
+  const url = local + '/live/ambiguous';
+  await context.route(url, route => route.fulfill({ contentType: 'text/html', body:
+    '<section class="video-player"><ol><li>LIVE</li><li>Volume</li><li>Clip</li><li>Settings</li></ol></section>' +
+    '<ol><li>That was close!</li><li>Look at that move</li><li>Great round</li><li>Here we go again</li></ol>' +
+    '<ol><li>One match remaining</li><li>Two stages complete</li><li>Three matches played</li><li>Four teams advance</li></ol>',
+  }));
+  const live = await context.newPage();
+  await live.goto(url);
+  const popup = await context.newPage();
+  await live.bringToFront();
+  await popup.goto(origin + '/popup.html');
+  await popup.getByRole('button', { name: '自动识别弹幕区' }).click();
+  await live.getByText('正在识别弹幕区', { exact: true }).waitFor();
+  await live.getByText('正在让模型对照候选区域截图和弹幕样本…', { exact: true }).waitFor();
+  await live.getByText('模型选出的候选区。Image matches the sample rows.', { exact: true }).waitFor();
+  const request = requestLog.find(({ messages }) => Array.isArray(messages[1].content) && JSON.parse(messages[1].content[0].text).candidates);
+  assert.ok(request);
+  const [prompt, image] = request.messages[1].content;
+  const { candidates } = JSON.parse(prompt.text);
+  assert.equal(candidates.length, 2);
+  assert.match(candidates[0].html, /That was close!/);
+  assert.match(candidates[1].html, /One match remaining/);
+  assert.doesNotMatch(prompt.text, /LIVE|Volume/);
+  assert.match(image.image_url.url, /^data:image\/jpeg;base64,/);
 });
 
 test('an endpoint that rejects images disables later visual checks while text translation still works', { timeout: 45_000 }, async t => {

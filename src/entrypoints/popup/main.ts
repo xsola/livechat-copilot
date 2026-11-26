@@ -55,6 +55,7 @@ async function prepareSite() {
 }
 
 async function command(pageAction: typeof actions[number]) {
+  status.textContent = pageAction === 'detect' ? '正在打开弹幕识别…' : '正在打开手动选区…';
   await prepareSite();
   let received = await send('pageCommand', { tabId, action: pageAction });
   if (!received) {
@@ -74,7 +75,7 @@ void run(async () => {
   for (const key of ['room', 'site'] as const) {
     if (site.scopes.some(item => item.scope === key)) scope.add(new Option(scopeNames[key], key));
   }
-  scope.value = effectiveScope(site.scopes)?.scope ?? 'site';
+  scope.value = site.preferredScope ?? effectiveScope(site.scopes)?.scope ?? 'site';
   showScope();
   emoji.checked = site.translateEmoji;
   emoji.disabled = false;
@@ -88,7 +89,10 @@ void run(async () => {
   }
 });
 
-scope.addEventListener('change', showScope);
+scope.addEventListener('change', () => {
+  showScope();
+  void run(() => send('setPreferredScope', scope.value as TranslationScope));
+});
 
 function setScope(checked: boolean | null) {
   const target = site.scopes.find(item => item.scope === scope.value);

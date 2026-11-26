@@ -6,7 +6,8 @@ import { languageName, normalizeLanguage } from '../rooms/language-input';
 import type { ChatRule, RuleMatch } from '../rules/schema';
 import { PageMeter } from '../usage/page-meter';
 import { testRule, invalidateSelector, type RuleTest } from './dom';
-import { findCandidate } from './detection/candidates';
+import { findCandidates, insidePlayer } from './detection/candidates';
+import { isTwitch, twitchChannel } from './twitch';
 import { Picker } from './detection/picker';
 import { PagePanel } from './page-panel';
 import { ChatSession } from './session';
@@ -20,6 +21,7 @@ function localId(rule: ChatRule) {
 }
 
 function relevantFrame(page: URL, frame: URL) {
+  if (isTwitch(page.hostname)) return Boolean(twitchChannel(page)) && window === window.top;
   if (!isYouTube(page.hostname)) return true;
   if (window === window.top && frame.pathname === '/live_chat') return true;
   const candidates = Array.from(window.top!.document.querySelectorAll<HTMLIFrameElement>(
@@ -50,8 +52,7 @@ export function startLiveChat(signal: AbortSignal) {
   let sessionSignature = '';
   let lastError = '';
   let counted = false;
-  let explicitDetection = false;
-  let looking = false;
+  let searchNumber = 0;
   let nextScan = 0;
   let nextSync = 0;
   let refreshing: Promise<void> | undefined;
@@ -75,6 +76,11 @@ export function startLiveChat(signal: AbortSignal) {
     activityObserver.observe(document.documentElement, { childList: true, subtree: true });
   }
 
+  function stopTracking() {
+    activityObserver?.disconnect();
+    activityObserver = undefined;
+  }
+
   function preparePicker() {
     if (picker) return picker;
     panel = new PagePanel(document);
@@ -95,8 +101,7 @@ export function startLiveChat(signal: AbortSignal) {
     session?.close();
     picker?.close();
     panel?.host.remove();
-    activityObserver?.disconnect();
-    activityObserver = undefined;
+    stopTracking();
     panel = undefined;
     picker = undefined;
     session = undefined;
@@ -104,8 +109,7 @@ export function startLiveChat(signal: AbortSignal) {
     snapshot = undefined;
     language = undefined;
     counted = false;
-    explicitDetection = false;
-    looking = false;
+    searchNumber++;
     lastError = '';
     nextScan = 0;
     nextSync = 0;
@@ -171,7 +175,8 @@ export function startLiveChat(signal: AbortSignal) {
         }
         continue;
       }
-      const result = testRule(document, match.rule);
+      const tested = testRule(document, match.rule);
+      const result = tested && !insidePlayer(tested.container) ? tested : undefined;
       if (match.staged) {
         if (result && !result.rejected && result.messages.length >= 2) {
           decide(match, true);
@@ -199,27 +204,9 @@ export function startLiveChat(signal: AbortSignal) {
     }
     if (!selected) {
       if (session) { session.close(); session = undefined; }
-      if (snapshot.settings.enabled || explicitDetection) {
-        trackActivity();
-        const candidate = findCandidate(document, page, frame, activity);
-        if (candidate) {
-          if (preparePicker().suggest(candidate)) meter.count('automatic');
-        } else if (explicitDetection && !picker) {
-          preparePicker();
-          looking = true;
-          panel!.show('正在查找弹幕', '还没有找到结构稳定的弹幕。可以等待新消息，也可以直接手动选区。');
-          panel!.button('选择弹幕区域', () => picker!.start());
-          panel!.button('关闭', () => { explicitDetection = false; picker!.close(); });
-        }
-      }
       return;
     }
-    activityObserver?.disconnect();
-    activityObserver = undefined;
-    if (looking) {
-      looking = false;
-      panel?.hide();
-    }
+    stopTracking();
     const { match, result } = selected;
     const { enabled, modelConfigured, mode, readingLanguage, revision, translateEmoji } = snapshot.settings;
     const signature = JSON.stringify([match.rule, enabled, modelConfigured, mode, readingLanguage, revision, translateEmoji]);
@@ -249,30 +236,67 @@ export function startLiveChat(signal: AbortSignal) {
 
   function activate(action: string) {
     if (!synchronize()) return;
+    if (action === 'capture-complete') { panel?.captureVisibility(true); return; }
     if (action === 'refresh') { void refresh(true); return; }
     if (action === 'pick') {
-      looking = false;
+      searchNumber++;
+      stopTracking();
       meter.count('manualPicker');
       preparePicker().start();
       void refresh();
     }
-    if (action === 'detect' || action === 'initial-review') {
-      explicitDetection = true;
-      if (picker) picker.resumeSuggestions();
+    if (action === 'initial-review') {
       void refresh(true).then(() => {
-        if (!explicitDetection) return;
-        if (session && (action === 'detect' || snapshot?.settings.autoVision)) {
+        if (!picker && session && snapshot?.settings.autoVision) {
           const current = session.match.rule;
           const existing = testRule(document, current);
           if (existing) preparePicker().showMatched({ ...existing, rule: current, score: 0 }, session.match.source);
         }
       });
     }
+    if (action === 'detect') {
+      const active = preparePicker();
+      const currentSearch = ++searchNumber;
+      active.beginSearch();
+      trackActivity();
+      void (async () => {
+        await refresh(true);
+        if (currentSearch !== searchNumber || !active.isSearching()) return;
+        const matched = () => {
+          if (!session) return false;
+          const existing = testRule(document, session.match.rule);
+          if (!existing?.messages.length) return false;
+          active.showMatched({ ...existing, rule: session.match.rule, score: 0 }, session.match.source);
+          return true;
+        };
+        if (matched()) return;
+        let candidates = findCandidates(document, page, frame, activity);
+        if (!candidates[0] || candidates[0].score < 9) {
+          await new Promise(resolve => setTimeout(resolve, 650));
+          if (currentSearch !== searchNumber || !active.isSearching()) return;
+          nextScan = 0;
+          scan();
+          if (matched()) return;
+          candidates = findCandidates(document, page, frame, activity);
+        }
+        const [best, runnerUp] = candidates;
+        const canCompare = snapshot?.settings.autoVision && snapshot.settings.imageInput && snapshot.settings.modelConfigured;
+        if (best && runnerUp && canCompare && best.score - runnerUp.score <= 2) {
+          await active.locate(candidates);
+        } else if (best && best.score >= 9) {
+          if (active.suggest(best)) meter.count('automatic');
+        } else {
+          await active.locate(candidates);
+        }
+      })().catch(error => active.noCandidate(error instanceof Error ? error.message + ' ' : undefined)).finally(() => {
+        if (currentSearch !== searchNumber) return;
+        stopTracking();
+      });
+    }
     if (action === 'room' && language) {
       const current = language;
       void current.read().then(preference => {
         if (language !== current) return;
-        looking = false;
         preparePicker().close();
         const info = current.context();
         const format = (code: string | null) => code ? languageName(code) + '（' + code + '）' : '回复语言尚未设置';
@@ -318,7 +342,8 @@ export function startLiveChat(signal: AbortSignal) {
   };
   chrome.runtime.onMessage.addListener(listener);
   const timer = setInterval(tick, 850);
-  window.addEventListener('pagehide', () => { session?.close(); session = undefined; void meter.flush(); }, { signal });
+  window.navigation?.addEventListener('currententrychange', tick, { signal });
+  window.addEventListener('pagehide', () => { picker?.close(); session?.close(); session = undefined; void meter.flush(); }, { signal });
   signal.addEventListener('abort', () => {
     clearInterval(timer);
     chrome.runtime.onMessage.removeListener(listener);

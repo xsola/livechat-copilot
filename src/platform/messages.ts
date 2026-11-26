@@ -5,7 +5,7 @@ import { pageCounter, type DailyUsage } from '../usage/usage';
 import type { RoomPreference } from './store';
 import type { ModelProbe, RoomProfile, TranslationItem, VisionAdvice } from '../models/tasks';
 import { promptTasks, type PromptTask } from '../models/prompts';
-import { scopeType, type ScopeOption } from './translation-scope';
+import { scopeType, type ScopeOption, type TranslationScope } from './translation-scope';
 
 const id = z.string().min(1).max(100);
 const roomKey = z.string().min(1).max(300);
@@ -34,6 +34,9 @@ const payloads = {
     html: z.string().min(1).max(12000),
     samples: z.array(z.string().max(300)).min(1).max(10),
   }),
+  locateChat: z.array(z.object({
+    id, rect, html: z.string().min(1).max(12000), samples: z.array(z.string().max(300)).min(2).max(6),
+  })).min(1).max(3),
   usage: z.partialRecord(pageCounter, z.number().int().positive().max(10000)),
   getSettings: z.undefined(),
   saveSettings: settingsSchema,
@@ -51,6 +54,7 @@ const payloads = {
   }),
   setTranslateEmoji: z.boolean(),
   setSkipReadingLanguage: z.boolean(),
+  setPreferredScope: scopeType,
   promptContext: z.number().int().nonnegative().optional(),
   savePrompt: z.object({
     tabId: z.number().int().nonnegative().optional(),
@@ -85,6 +89,7 @@ export interface SiteState {
   translateEmoji: boolean;
   skipReadingLanguage: boolean;
   readingLanguage: string;
+  preferredScope: TranslationScope | null;
   scopes: ScopeOption[];
 }
 export interface RuleSummary { local: Array<{ id: string; host: string; path?: string }>; active: number; staged: number }
@@ -102,6 +107,7 @@ interface Results {
   decideRule: void;
   translate: TranslationItem[];
   verify: VisionAdvice;
+  locateChat: { candidateId: string | null; reason: string };
   usage: void;
   getSettings: { settings: Settings; browserLanguage: string; rules: RuleSummary; imageUnavailable: boolean };
   saveSettings: void;
@@ -116,6 +122,7 @@ interface Results {
   pageCommand: boolean;
   setTranslateEmoji: void;
   setSkipReadingLanguage: void;
+  setPreferredScope: void;
   promptContext: PromptContext;
   savePrompt: PromptContext;
   setSite: SiteState;

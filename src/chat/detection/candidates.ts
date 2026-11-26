@@ -1,4 +1,4 @@
-import { matches, messageText, query, selectorPath, stableSelector, testRule, type RuleTest } from '../dom';
+import { matches, messageText, query, queryAll, selectorPath, stableSelector, testRule, type RuleTest } from '../dom';
 import type { ChatRule } from '../../rules/schema';
 import { isYouTube } from '../../platform/config';
 
@@ -7,12 +7,22 @@ export interface Candidate extends RuleTest { rule: ChatRule; score: number }
 const chatNames = /chat|comment|message|danmaku/i;
 const messageBodies = [
   '#message', '[data-message-body]', '[data-testid*="message-text"]', '[data-testid*="message-content"]',
+  '[data-a-target="chat-line-message-body"]', '[data-test-selector="chat-line-message-body"]', '.chat-line__message--message',
   '[data-role="message-body"]', '.message-body', '.message-content', '.message-text', '.chat-text', '.comment-text', '.body', '.text',
 ];
 const author = '[rel="author"], [class*="author" i], [class*="username" i], [data-testid*="username" i], #author-name';
-const excluded = 'nav, header, footer, form, video, canvas, [data-livechat-copilot]';
+const excluded = 'nav, header, footer, form, video, canvas, [role="toolbar"], [role="menu"], [data-livechat-copilot], ' +
+  '[data-a-target^="player"], [data-a-target="video-player"], .video-player, [class*="player-controls" i]';
+const messageRow = '[data-a-target="chat-line-message"], [data-test-selector="chat-line-message"], .chat-line__message, ' +
+  'yt-live-chat-text-message-renderer, [data-message-id], [data-testid="chat-message"]';
+const rowSelector = ':is(' + messageRow + ', [role="listitem"])';
 const editors = 'textarea, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], input[type="text"], input:not([type])';
 const sendLabel = /\b(?:send|submit|post|chat.send)\b|发送|發送|送信|전송/i;
+
+export function insidePlayer(element: Element) {
+  return Boolean(element.closest('video, canvas, [data-a-target^="player"], [data-a-target="video-player"], ' +
+    '.video-player, [class*="player-controls" i]'));
+}
 
 function sharedBody(row: Element, example: Element) {
   if (example.id && row.querySelectorAll('#' + CSS.escape(example.id)).length === 1) return '#' + CSS.escape(example.id);
@@ -28,9 +38,13 @@ export function candidateFrom(
   frame: URL,
   example?: Element,
 ): Candidate | undefined {
+  if (region.closest(excluded) || query(region, 'video, [data-a-target="video-player"]')) return;
   const container = selectorPath(document, region);
   if (!container || container.length > 500) return;
-  const children = Array.from(region.children).slice(-30).filter(child => !matches(child, excluded));
+  const semanticRows = queryAll(region, rowSelector + ':not(' + rowSelector + ' *)');
+  const useSemantic = semanticRows.length >= 2 && (!example || semanticRows.some(row => row.contains(example)));
+  const children = (useSemantic ? semanticRows : Array.from(region.children)).slice(-40)
+    .filter(child => !matches(child, excluded));
   const sampleRow = example && children.find(row => row.contains(example));
   if (example && !sampleRow) return;
   const groups = new Map<string, Element[]>();
@@ -43,9 +57,12 @@ export function candidateFrom(
   const distinct = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
   const top = sampleRow ? distinct.find(([shape]) => matches(sampleRow, shape)) : distinct[0];
   if (!top) return;
-  const [shape, rows] = top;
+  const [shape, group] = top;
+  const rows = useSemantic ? children : group;
+  if (rows.length < 2) return;
   const fit = messageBodies.find(selector => rows.filter(row => query(row, selector)).length >= Math.ceil(rows.length * 0.65));
-  const body = sampleRow && example !== sampleRow ? sharedBody(sampleRow, example!) : fit;
+  const body = sampleRow && example !== sampleRow
+    ? (fit && query(sampleRow, fit)?.contains(example!) ? fit : sharedBody(sampleRow, example!)) : fit;
   if (sampleRow && example !== sampleRow && !body) return;
   if (!body && rows.some(row => query(row, author))) return;
   const framePathPrefix = page.pathname === frame.pathname ? undefined : frame.pathname.slice(0, 250);
@@ -53,13 +70,15 @@ export function candidateFrom(
   const rule: ChatRule = {
     schemaVersion: 1, id: 'candidate', version: 1, host: page.hostname,
     pathPrefix: pathPrefix.slice(0, 250), framePathPrefix,
-    container, message: ':scope > ' + shape, body,
+    container, message: useSemantic ? rowSelector + ':not(' + rowSelector + ' *)' : ':scope > ' + shape, body,
   };
   const preview = testRule(document, rule, region);
-  if (!preview?.messages.length) return;
-  const names = [region.id, region.getAttribute('class'), region.getAttribute('aria-label')].join(' ');
+  if (!preview || preview.messages.length < 2 || preview.rejected) return;
+  const names = [region.id, region.getAttribute('class'), region.getAttribute('aria-label'),
+    region.getAttribute('data-a-target'), region.getAttribute('data-test-selector')].join(' ');
   const semantic = region.getAttribute('role') === 'log' ? 8 : chatNames.test(names) ? 4 : 0;
-  const score = semantic + Math.min(6, rows.length) + (body ? 4 : 0) + (fit ? 2 : 0);
+  const score = semantic + Math.min(6, rows.length) + (body ? 4 : 0) + (fit ? 2 : 0) +
+    (rows.some(row => matches(row, messageRow)) ? 5 : 0);
   return { ...preview, rule, score };
 }
 
@@ -105,10 +124,24 @@ export function composerElements(candidate: Candidate) {
   return { editor, button: visible(button) ? button : null, state: 'editable' as const };
 }
 
-export function findCandidate(document: Document, page: URL, frame: URL, activity: ReadonlyMap<Element, number>) {
+export function candidateFromExample(document: Document, example: Element, page: URL, frame: URL) {
+  if (example.closest(excluded)) return;
+  const row = example.closest(messageRow);
+  const body = example.closest(messageBodies.join(', '));
+  const firstAncestor = row ? row.parentElement : body ? body.parentElement?.parentElement : example.parentElement;
+  for (let ancestor = firstAncestor, depth = 0; ancestor && ancestor !== document.body && depth < 12;
+    ancestor = ancestor.parentElement, depth++) {
+    if (ancestor.closest(excluded)) continue;
+    const candidate = candidateFrom(document, ancestor, page, frame, example);
+    if (candidate) return candidate;
+  }
+}
+
+export function findCandidates(document: Document, page: URL, frame: URL, activity: ReadonlyMap<Element, number>) {
   const named = Array.from(document.querySelectorAll(
-    '[role="log"], [aria-live], [id*="chat" i], [class*="chat" i], [id*="comment" i], [class*="comment" i], [role="feed"]',
-  )).slice(0, 80);
+    '[role="log"], [aria-live], [id*="chat" i], [class*="chat" i], [id*="comment" i], [class*="comment" i], [role="feed"], ' +
+    '[data-a-target*="chat" i], [data-test-selector*="chat" i]',
+  )).slice(0, 100);
   const shortlists = new Set(named.flatMap(node => [node, ...Array.from(node.children).slice(0, 8)]));
   for (const [element, changes] of activity) if (changes >= 2 && element.isConnected) shortlists.add(element);
   if (shortlists.size < 24) {
@@ -117,14 +150,20 @@ export function findCandidate(document: Document, page: URL, frame: URL, activit
   const ranked: Candidate[] = [];
   for (const element of shortlists) {
     if (element === document.body || element === document.documentElement ||
-        element.closest(excluded) || element.children.length < 2 ||
+        element.closest(excluded) || query(element, 'video, [data-a-target="video-player"]') || !element.children.length ||
         element.clientHeight <= 0 || element.clientWidth <= 0) continue;
     const found = candidateFrom(document, element, page, frame);
     if (!found || found.messages.length < 2) continue;
     const score = found.score + Math.min(5, activity.get(element) ?? 0);
-    if (score >= 9) ranked.push({ ...found, score });
+    if (score >= 4) ranked.push({ ...found, score });
   }
-  return ranked.sort((a, b) => b.score - a.score)[0];
+  const unique = new Set<Element>();
+  return ranked.sort((a, b) => b.score - a.score).filter(candidate => {
+    const first = candidate.messages[0]!.node;
+    if (unique.has(first)) return false;
+    unique.add(first);
+    return true;
+  });
 }
 
 export function visionSample(candidate: Candidate) {

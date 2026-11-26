@@ -1,6 +1,6 @@
 import type { CaptureRect } from './messages';
 
-export async function captureCandidate(tab: chrome.tabs.Tab, regions: CaptureRect[]) {
+export async function captureCandidate(tab: chrome.tabs.Tab, regions: CaptureRect[], compare = false) {
   const requireOriginalTab = async () => {
     const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
     if (!active || active.id !== tab.id || (active.url && tab.url && active.url !== tab.url)) {
@@ -23,7 +23,8 @@ export async function captureCandidate(tab: chrome.tabs.Tab, regions: CaptureRec
       const width = Math.min(bitmap.width - x, Math.floor(rect.width * scaleX));
       const height = Math.min(bitmap.height - y, Math.floor(rect.height * scaleY));
       if (width < 8 || height < 8) throw new Error('候选区域不在可见范围内。');
-      const shrink = Math.min(1, 1050 / width, (index === 0 ? 820 : 200) / height);
+      const heightLimit = compare ? 520 : index === 0 ? 820 : 200;
+      const shrink = Math.min(1, 1050 / width, heightLimit / height);
       return { x, y, width, height, w: Math.round(width * shrink), h: Math.round(height * shrink) };
     });
     const gap = 6;

@@ -100,6 +100,20 @@ export function createTasks(meter: Meter, request = fetch) {
         taskInstructions('vision', settings, settings.systemPrompts.vision ?? promptDefaults.vision),
         { language: settings.readingLanguage, sample }, result => requireResult(visionOutput, result), 250, image);
     },
+    locateChat(settings: Settings, image: string, candidates: ReadonlyArray<{ id: string; html: string; samples: string[] }>) {
+      return call('vision', settings,
+        'Find the live chat message list. The screenshot contains candidate crops in the given order, stacked from top to bottom. ' +
+        'Match the repeated rows visible in the image to the candidate HTML and message samples. Ignore player buttons, stream labels, ' +
+        'static comments and unrelated lists. Pick only an ID from candidates. Return {"candidateId":"id","reason":"short explanation"}. ' +
+        'Use null when the live chat is not shown. Explain briefly in the requested language.',
+        { candidates, language: settings.readingLanguage }, value => {
+          const result = requireResult(z.object({ candidateId: z.string().nullable(), reason: z.string().max(400) }), value);
+          if (result.candidateId && !candidates.some(candidate => candidate.id === result.candidateId)) {
+            throw new ModelError('模型返回了未知弹幕区域。');
+          }
+          return result;
+        }, 250, image);
+    },
     roomProfile(settings: Settings, hints: object, lines: string[]) {
       return call('roomProfile', settings,
         taskInstructions('roomProfile', settings, settings.systemPrompts.roomProfile ?? promptDefaults.roomProfile),

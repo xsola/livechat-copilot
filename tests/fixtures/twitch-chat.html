@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<meta charset="UTF-8">
+<title>Twitch-style live chat</title>
+<style>
+  main {display:grid;grid-template-columns: 1fr 340px; gap:12px}
+  .video-player {background:#273044;color:white;min-height:370px;padding:12px}
+  .chat-scrollable-area__message-container {height:240px;overflow:auto;border:1px solid #999}
+  .chat-line__message {padding:8px}
+</style>
+<body>
+<main>
+  <section class="video-player" data-a-target="video-player">
+    <div data-a-target="player-controls"><div>LIVE</div><div>音量剪辑</div></div>
+  </section>
+  <aside data-test-selector="chat-shell">
+    <div class="chat-scrollable-area__message-container" data-test-selector="chat-scrollable-area__message-container">
+      <div class="message-wrapper">
+        <div class="chat-line__message" data-a-target="chat-line-message"><b class="chat-author">One:</b>
+          <span data-a-target="chat-line-message-body"><span>Fantastic</span> <span>comeback!</span></span>
+        </div>
+      </div>
+      <div class="message-wrapper">
+        <div class="chat-line__message" data-a-target="chat-line-message"><b class="chat-author">Two:</b>
+          <span data-a-target="chat-line-message-body"><span>What a</span> <span>game!</span></span>
+        </div>
+      </div>
+    </div>
+    <form><textarea data-a-target="chat-input" aria-label="Send a message"></textarea><button data-a-target="chat-send-button">Chat</button></form>
+  </aside>
+</main>
+</body>
+</html>

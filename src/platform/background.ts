@@ -16,7 +16,8 @@ import { alreadyInReadingLanguage } from './reading-language';
 type Command = NonNullable<ReturnType<typeof parseCommand>>;
 const uiOnly = new Set<Command['kind']>([
   'getSettings', 'saveSettings', 'saveModelSettings', 'saveReadingSettings', 'probeModel', 'syncRegistry', 'usageSummary',
-  'clearUsage', 'removeRule', 'site', 'setSite', 'attach', 'pageCommand', 'setTranslateEmoji', 'setSkipReadingLanguage', 'promptContext', 'savePrompt',
+  'clearUsage', 'removeRule', 'site', 'setSite', 'attach', 'pageCommand', 'setTranslateEmoji', 'setSkipReadingLanguage',
+  'setPreferredScope', 'promptContext', 'savePrompt',
 ]);
 const registryAlarm = 'refresh-community-rules';
 const checksInFlight = new Set<string>();
@@ -110,6 +111,16 @@ function refreshPages() {
   void chrome.tabs.query({}).then(tabs => Promise.all(tabs.map(tab =>
     tab.id === undefined ? undefined : chrome.tabs.sendMessage(tab.id, { pageAction: 'refresh' }).catch(() => undefined),
   ))).catch(() => undefined);
+}
+
+async function captureForReview(tab: chrome.tabs.Tab, frameId: number | undefined, regions: Parameters<typeof captureCandidate>[1], compare = false) {
+  try {
+    return await captureCandidate(tab, regions, compare);
+  } finally {
+    if (tab.id !== undefined) {
+      void chrome.tabs.sendMessage(tab.id, { pageAction: 'capture-complete' }, { frameId }).catch(() => undefined);
+    }
+  }
 }
 
 async function routePageCommand(tabId: number, action: string) {
@@ -213,7 +224,8 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
         translations--;
       }
     }
-    case 'verify': {
+    case 'verify':
+    case 'locateChat': {
       const key = 'vision:' + tab.id;
       if (checksInFlight.has(key)) throw new Error('Image verification is already running for this tab.');
       if (!state.settings.autoVision) throw new Error('截图核验未开启。');
@@ -223,8 +235,13 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       checksInFlight.add(key);
       try {
         const settings = await authorizedModel(pageSettings(state, page.origin));
+        if (cmd.kind === 'locateChat') {
+          const image = await captureForReview(tab, sender.frameId, cmd.payload.map(({ rect }) => rect), true);
+          if ((await readState()).revision !== state.revision) throw new Error('模型设置已变化，已跳过截图查找。');
+          return await tasks.locateChat(settings, image, cmd.payload.map(({ id, html, samples }) => ({ id, html, samples })));
+        }
         const { rect, editorRect, sendRect, html, samples } = cmd.payload;
-        const image = await captureCandidate(tab, [rect, editorRect, sendRect].filter(r => r !== undefined));
+        const image = await captureForReview(tab, sender.frameId, [rect, editorRect, sendRect].filter(r => r !== undefined));
         if ((await readState()).revision !== state.revision) throw new Error('模型设置已变化，已跳过复核。');
         return await tasks.vision(settings, image, { html, samples, editorImage: Boolean(editorRect), sendImage: Boolean(sendRect) });
       } catch (error) {
@@ -304,6 +321,10 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
     }
     case 'pageCommand':
       return routePageCommand(cmd.payload.tabId, cmd.payload.action);
+    case 'setPreferredScope':
+      return editState(state => ({
+        changes: { settings: { ...state.settings, preferredScope: cmd.payload } }, result: undefined,
+      }));
     case 'promptContext':
       return promptContext(await promptPage(cmd.payload));
     case 'savePrompt': {
@@ -425,6 +446,7 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
         origin, youtube: isYouTube(page.hostname) && page.protocol === 'https:',
         translateEmoji: state.settings.translateEmoji, skipReadingLanguage: state.settings.skipReadingLanguage,
         readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()),
+        preferredScope: state.settings.preferredScope,
         scopes: await scopeOptions(page, state.enabledSites, state.scopeOverrides),
       } satisfies SiteState;
     }
