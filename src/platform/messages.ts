@@ -5,6 +5,7 @@ import { pageCounter, type DailyUsage } from '../usage/usage';
 import type { RoomPreference } from './store';
 import type { ModelProbe, RoomProfile, TranslationItem, VisionAdvice } from '../models/tasks';
 import { promptTasks, type PromptTask } from '../models/prompts';
+import { scopeType, type ScopeOption } from './translation-scope';
 
 const id = z.string().min(1).max(100);
 const roomKey = z.string().min(1).max(300);
@@ -49,6 +50,7 @@ const payloads = {
     action: z.enum(['ping', 'pick', 'detect', 'room', 'initial-review']),
   }),
   setTranslateEmoji: z.boolean(),
+  setSkipReadingLanguage: z.boolean(),
   promptContext: z.number().int().nonnegative().optional(),
   savePrompt: z.object({
     tabId: z.number().int().nonnegative().optional(),
@@ -56,10 +58,14 @@ const payloads = {
     task: z.enum(promptTasks),
     value: z.string().trim().min(1).max(4000).nullable(),
   }),
-  setSite: z.object({ tabId: z.number().int().nonnegative(), enabled: z.boolean(), origin: z.string().max(350) }),
+  setSite: z.object({
+    tabId: z.number().int().nonnegative(), enabled: z.boolean().nullable(), origin: z.string().max(350),
+    scope: scopeType.default('site'), key: z.string().max(350).optional(),
+  }),
   attach: z.number().int().nonnegative(),
   getRoom: roomKey,
   setRoom: z.object({ key: roomKey, language: languageCode.nullable() }),
+  resolveRoomLanguage: z.string().trim().min(1).max(80),
   identifyRoom: z.object({
     key: roomKey,
     hints: z.object({
@@ -73,7 +79,14 @@ const payloads = {
 };
 
 export interface PageSnapshot { settings: PageSettings; rules: RuleMatch[] }
-export interface SiteState { enabled: boolean; origin: string; youtube: boolean; translateEmoji: boolean }
+export interface SiteState {
+  origin: string;
+  youtube: boolean;
+  translateEmoji: boolean;
+  skipReadingLanguage: boolean;
+  readingLanguage: string;
+  scopes: ScopeOption[];
+}
 export interface RuleSummary { local: Array<{ id: string; host: string; path?: string }>; active: number; staged: number }
 export interface PromptContext {
   origin: string | null;
@@ -102,12 +115,14 @@ interface Results {
   site: SiteState;
   pageCommand: boolean;
   setTranslateEmoji: void;
+  setSkipReadingLanguage: void;
   promptContext: PromptContext;
   savePrompt: PromptContext;
   setSite: SiteState;
   attach: void;
   getRoom: RoomPreference | null;
   setRoom: RoomPreference | null;
+  resolveRoomLanguage: string | null;
   identifyRoom: { preference: RoomPreference; profile?: RoomProfile };
 }
 

@@ -3,6 +3,8 @@ import test from 'node:test';
 import { alignTranslations, createTasks } from '../../src/models/tasks';
 import { generateDraft } from '../../src/agent/tasks/draft';
 import { defaults, parseEndpoint, parseRegistry, readingLanguage } from '../../src/platform/config';
+import { normalizeLanguage } from '../../src/rooms/language-input';
+import { effectiveScope, scopeOptions, scopeValue } from '../../src/platform/translation-scope';
 import { parseCommand } from '../../src/platform/messages';
 import { decideRule, resolveRules, stageRules } from '../../src/rules/resolver';
 import { ruleIndex, type ChatRule } from '../../src/rules/schema';
@@ -21,6 +23,26 @@ test('reading language follows Chrome unless the user overrides it', () => {
   assert.equal(readingLanguage('', 'pt_BR'), 'pt-BR');
   assert.equal(readingLanguage('ja', 'pt-BR'), 'ja');
   assert.equal(readingLanguage('', ''), 'en');
+});
+
+test('room language accepts native names and common aliases', () => {
+  for (const input of ['日语', '日本語', 'Japanese', 'jp', 'ja']) assert.equal(normalizeLanguage(input), 'ja');
+  assert.equal(normalizeLanguage('zh_tw'), 'zh-TW');
+  assert.equal(normalizeLanguage('the language the host is using'), undefined);
+});
+
+test('a page override takes precedence and room rules follow the YouTube livestream ID', async () => {
+  const watch = new URL('https://www.youtube.com/watch?v=stream-a');
+  const direct = new URL('https://www.youtube.com/live/stream-a');
+  const another = new URL('https://www.youtube.com/watch?v=stream-b');
+  const initial = await scopeOptions(watch, [], {});
+  const room = initial.find(option => option.scope === 'room')!.key;
+  const page = initial.find(option => option.scope === 'page')!.key;
+  const overrides = { [room]: true, [page]: false };
+  assert.equal(effectiveScope(await scopeOptions(watch, [], overrides))?.value, false);
+  assert.equal(effectiveScope(await scopeOptions(direct, [], overrides))?.value, true);
+  assert.equal(effectiveScope(await scopeOptions(another, [], overrides))?.value, false);
+  assert.equal(scopeValue(await scopeOptions(watch, [], overrides), 'room'), true);
 });
 
 test('local rules outrank staged, active and bundled rules', () => {

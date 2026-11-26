@@ -1,14 +1,35 @@
 import '../../platform/ui.css';
 import { hostPattern } from '../../platform/config';
 import { send, type SiteState } from '../../platform/messages';
+import { effectiveScope, scopeValue, type TranslationScope } from '../../platform/translation-scope';
+import { languageName } from '../../rooms/language-input';
 
 const siteLabel = document.querySelector<HTMLParagraphElement>('#site')!;
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const emoji = document.querySelector<HTMLInputElement>('#translate-emoji')!;
+const skipReading = document.querySelector<HTMLInputElement>('#skip-reading')!;
+const scope = document.querySelector<HTMLSelectElement>('#scope')!;
+const resetScope = document.querySelector<HTMLButtonElement>('#reset-scope')!;
+const scopeHelp = document.getElementById('scope-help')!;
 const status = document.querySelector<HTMLParagraphElement>('#status')!;
 const actions = ['detect', 'pick', 'room'] as const;
 let tabId: number;
 let site: SiteState;
+const scopeNames: Record<TranslationScope, string> = { room: '当前直播间', page: '当前网页', site: '整个网站' };
+
+function showScope() {
+  const selected = scope.value as TranslationScope;
+  const target = site.scopes.find(item => item.scope === selected);
+  if (!target) return;
+  enabled.checked = scopeValue(site.scopes, selected);
+  enabled.disabled = false;
+  scope.disabled = false;
+  resetScope.hidden = selected === 'site' || target.value === null;
+  resetScope.disabled = false;
+  const current = effectiveScope(site.scopes);
+  scopeHelp.textContent = current ? '当前页面按「' + scopeNames[current.scope] + '」设置' +
+    (current.value ? '启用翻译。' : '关闭翻译。') : '';
+}
 
 async function run(operation: () => Promise<void>) {
   status.textContent = '';
@@ -46,10 +67,16 @@ void run(async () => {
   tabId = tab.id;
   site = await send('site', tabId);
   siteLabel.textContent = new URL(site.origin).hostname;
-  enabled.checked = site.enabled;
-  enabled.disabled = false;
+  for (const key of ['room', 'page', 'site'] as const) {
+    if (site.scopes.some(item => item.scope === key)) scope.add(new Option(scopeNames[key], key));
+  }
+  scope.value = effectiveScope(site.scopes)?.scope ?? 'site';
+  showScope();
   emoji.checked = site.translateEmoji;
   emoji.disabled = false;
+  skipReading.checked = site.skipReadingLanguage;
+  skipReading.disabled = false;
+  document.getElementById('skip-label')!.textContent = '自动翻译时跳过' + languageName(site.readingLanguage) + '弹幕';
   for (const action of actions) {
     const button = document.querySelector<HTMLButtonElement>('#' + action)!;
     button.disabled = false;
@@ -57,18 +84,34 @@ void run(async () => {
   }
 });
 
-enabled.addEventListener('change', () => {
-  const checked = enabled.checked;
+scope.addEventListener('change', showScope);
+
+function setScope(checked: boolean | null) {
+  const target = site.scopes.find(item => item.scope === scope.value);
+  if (!target) return;
   enabled.disabled = true;
+  scope.disabled = true;
+  resetScope.disabled = true;
   void run(async () => {
     if (checked) await prepareSite();
-    site = await send('setSite', { tabId, enabled: checked, origin: site.origin });
-    status.textContent = checked ? '已启用。请在设置中配置并授权模型。' : '已暂停本站翻译。';
-    if (checked) void send('pageCommand', { tabId, action: 'initial-review' }).catch(() => undefined);
-  }).finally(() => {
-    enabled.checked = site.enabled;
-    enabled.disabled = false;
-  });
+    site = await send('setSite', { tabId, enabled: checked, origin: site.origin, scope: target.scope, key: target.key });
+    status.textContent = checked === null ? '已恢复到更广范围的设置。' : checked ? '已启用。' : '已关闭。';
+    if (checked && effectiveScope(site.scopes)?.value) {
+      void send('pageCommand', { tabId, action: 'initial-review' }).catch(() => undefined);
+    }
+  }).finally(showScope);
+}
+
+enabled.addEventListener('change', () => setScope(enabled.checked));
+resetScope.addEventListener('click', () => setScope(null));
+
+skipReading.addEventListener('change', () => {
+  const checked = skipReading.checked;
+  skipReading.disabled = true;
+  void run(async () => {
+    await send('setSkipReadingLanguage', checked);
+    site.skipReadingLanguage = checked;
+  }).finally(() => { skipReading.checked = site.skipReadingLanguage; skipReading.disabled = false; });
 });
 
 emoji.addEventListener('change', () => {

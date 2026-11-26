@@ -13,6 +13,7 @@ export interface State {
   settings: Settings;
   revision: number;
   enabledSites: string[];
+  scopeOverrides: Record<string, boolean>;
   localRules: ChatRule[];
   community: CommunityRules;
   roomPreferences: Record<string, RoomPreference>;
@@ -25,6 +26,7 @@ const initial: State = {
   settings: defaults,
   revision: 0,
   enabledSites: [],
+  scopeOverrides: {},
   localRules: [],
   community: { active: [], staged: [], rejected: {} },
   roomPreferences: {},

@@ -20,6 +20,7 @@ export const settingsSchema = z.strictObject({
   registryUrl: z.string().max(500),
   autoVision: z.boolean().default(false),
   translateEmoji: z.boolean().default(false),
+  skipReadingLanguage: z.boolean().default(true),
   systemPrompts: promptOverrides.default({}),
 });
 export type Settings = z.infer<typeof settingsSchema>;
@@ -44,6 +45,7 @@ export const defaults: Settings = {
   registryUrl: '',
   autoVision: false,
   translateEmoji: false,
+  skipReadingLanguage: true,
   systemPrompts: {},
 };
 

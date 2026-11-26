@@ -34,6 +34,7 @@ async function boot(t) {
       : Array.isArray(content) ? { verdict: 'likely-chat', reason: 'Synthetic region confirmed.',
         composerVerdict: command.sample.editorImage ? 'likely-composer' : 'unlikely-composer' }
       : items.length ? { translations: items.map(({ id, text }) => ({ id, text: '译：' + text })) }
+      : command.languageInput ? { language: 'ja' }
       : command.check ? { ok: true } : { language: 'en', title: null, streamer: null, category: null };
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
       choices: [{ message: { content: JSON.stringify(output) } }],
@@ -80,6 +81,7 @@ async function boot(t) {
   await options.locator('#endpoint').fill('http://127.0.0.1:' + server.address().port + '/v1');
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
+  await command(options, 'setSkipReadingLanguage', false);
   return { context, worker, origin, options, requestLog, local: 'http://127.0.0.1:' + server.address().port };
 }
 
@@ -218,7 +220,7 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
   await live.bringToFront();
-  await popup.getByRole('button', { name: '选择弹幕区域' }).click();
+  await popup.getByRole('button', { name: '手动选择弹幕区' }).click();
   await chat.getByText('移动鼠标高亮元素', { exact: false }).waitFor();
   await chat.getByText('New tournament', { exact: true }).hover();
   await live.keyboard.press('ArrowUp');
@@ -240,13 +242,13 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   assert.equal(await chat.getByText('译：Amazing comeback', { exact: true }).count(), 0);
 
   await action(options, tab, 'room');
-  await chat.locator('input[placeholder="ja / en / zh-CN"]').fill('jp');
+  await chat.locator('input[placeholder="例如日语、Japanese、jp"]').fill('日语');
   await chat.getByRole('button', { name: '保存语言' }).click();
   await chat.getByText('已保存。日语（ja）', { exact: true }).waitFor();
   await live.reload();
   await chat.getByText('译：New tournament').waitFor();
   await action(options, tab, 'room');
-  await until(() => chat.locator('input[placeholder="ja / en / zh-CN"]').inputValue({ timeout: 1500 }).then(value => value === 'ja'));
+  await until(() => chat.locator('input[placeholder="例如日语、Japanese、jp"]').inputValue({ timeout: 1500 }).then(value => value === 'ja'));
   assert.equal(await live.frameLocator('#duplicate-chat').getByText('当前直播间', { exact: true }).count(), 0);
   await live.evaluate(() => {
     history.pushState(null, '', '/watch?v=two');
@@ -256,7 +258,7 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await chat.getByText('译：Second room').waitFor();
   assert.equal(await chat.getByText('译：New tournament').count(), 0);
   await action(options, tab, 'room');
-  assert.equal(await chat.locator('input[placeholder="ja / en / zh-CN"]').inputValue(), '');
+  assert.equal(await chat.locator('input[placeholder="例如日语、Japanese、jp"]').inputValue(), '');
   await until(async () => (await command(options, 'usageSummary')).some(day => day.page.manualPicker && day.page.rendered));
   await options.locator('#export').click();
   await until(async () => Boolean(await options.locator('#diagnostic').inputValue()));
@@ -397,4 +399,54 @@ test('settings test unsaved model fields and keep the browser language as the de
   const updated = (await command(options, 'getSettings')).settings;
   assert.equal(updated.readingLanguage, 'ja');
   assert.equal(updated.model.model, 'test-model');
+});
+
+test('the popup scopes translation to a room, supports a page override, and skips matching languages', { timeout: 45_000 }, async t => {
+  const { context, options, origin, requestLog } = await boot(t);
+  const { settings } = await command(options, 'getSettings');
+  await command(options, 'saveReadingSettings', { readingLanguage: 'en', mode: 'batch', prompt: settings.prompt });
+  const live = await context.newPage();
+  await live.goto('https://www.youtube.com/watch?v=one');
+  const popup = await context.newPage();
+  await live.bringToFront();
+  await popup.goto(origin + '/popup.html');
+  await popup.locator('#skip-reading').check();
+  await popup.locator('#scope').selectOption('room');
+  await popup.locator('#enabled').check();
+  await popup.getByText('当前页面按「当前直播间」设置启用翻译。', { exact: true }).waitFor();
+
+  const english = 'Thank you for streaming today. I hope you enjoy the game and have a wonderful evening.';
+  const japanese = '今日の配信ありがとうございます。また一緒にゲームをしましょう。';
+  const chat = live.frameLocator('#chatframe');
+  await chat.locator('#items').evaluate((area, texts) => {
+    for (const text of texts) {
+      const row = document.createElement('yt-live-chat-text-message-renderer');
+      const body = document.createElement('span');
+      body.id = 'message';
+      body.textContent = text;
+      row.append(body);
+      area.append(row);
+    }
+  }, [english, japanese]);
+  await chat.getByText('译：' + japanese, { exact: true }).waitFor();
+  assert.equal(requestLog.some(request => JSON.stringify(request.messages[1].content).includes(english)), false);
+
+  await popup.locator('#scope').selectOption('page');
+  assert.equal(await popup.locator('#enabled').isChecked(), true);
+  await popup.locator('#enabled').uncheck();
+  await popup.getByText('当前页面按「当前网页」设置关闭翻译。', { exact: true }).waitFor();
+  await chat.getByText('译：' + japanese, { exact: true }).waitFor({ state: 'detached' });
+  await popup.getByRole('button', { name: '重置此范围' }).click();
+  await popup.getByText('当前页面按「当前直播间」设置启用翻译。', { exact: true }).waitFor();
+
+  const tab = await tabId(options, live.url());
+  await command(options, 'saveReadingSettings', { readingLanguage: 'en', mode: 'manual', prompt: settings.prompt });
+  await chat.locator('yt-live-chat-text-message-renderer').filter({ hasText: english })
+    .getByRole('button', { name: '翻译', exact: true }).click();
+  await chat.getByText('译：' + english, { exact: true }).waitFor();
+  await action(options, tab, 'room');
+  await chat.getByPlaceholder('例如日语、Japanese、jp').fill('我想用日本主播们直播常用的那门语言');
+  await chat.getByRole('button', { name: '保存语言' }).click();
+  await chat.getByText('已保存。日语（ja）', { exact: true }).waitFor();
+  assert.ok(requestLog.some(request => JSON.stringify(request.messages[1].content).includes('我想用日本主播们直播常用的那门语言')));
 });

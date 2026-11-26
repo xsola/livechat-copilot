@@ -10,11 +10,13 @@ import { editState, readState, type State } from './store';
 import type { RoomPreference } from './store';
 import { captureCandidate } from './capture';
 import { parseCommand, type PromptContext, type SiteState } from './messages';
+import { effectiveScope, scopeOptions } from './translation-scope';
+import { alreadyInReadingLanguage } from './reading-language';
 
 type Command = NonNullable<ReturnType<typeof parseCommand>>;
 const uiOnly = new Set<Command['kind']>([
   'getSettings', 'saveSettings', 'saveModelSettings', 'saveReadingSettings', 'probeModel', 'syncRegistry', 'usageSummary',
-  'clearUsage', 'removeRule', 'site', 'setSite', 'attach', 'pageCommand', 'setTranslateEmoji', 'promptContext', 'savePrompt',
+  'clearUsage', 'removeRule', 'site', 'setSite', 'attach', 'pageCommand', 'setTranslateEmoji', 'setSkipReadingLanguage', 'promptContext', 'savePrompt',
 ]);
 const registryAlarm = 'refresh-community-rules';
 const checksInFlight = new Set<string>();
@@ -160,7 +162,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
   const frame = webUrl(sender.url);
   if (page.origin !== frame.origin) throw new Error('Cross-origin chat frames are not supported in this release.');
   const state = await readState();
-  const enabled = state.enabledSites.includes(page.origin);
+  const enabled = async () => effectiveScope(await scopeOptions(page, state.enabledSites, state.scopeOverrides))?.value === true;
   const requireRoom = (key: string) => {
     if (!key.startsWith(page.origin + '|')) throw new Error('Room does not belong to this site.');
   };
@@ -169,7 +171,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       const granted = await chrome.permissions.contains({ origins: [hostPattern(parseEndpoint(state.settings.model.endpoint))] });
       return {
         settings: {
-          enabled, modelConfigured: granted, imageInput: imageUnavailable(state) ? false : state.settings.model.imageInput,
+          enabled: await enabled(), modelConfigured: granted, imageInput: imageUnavailable(state) ? false : state.settings.model.imageInput,
           translateEmoji: state.settings.translateEmoji,
           autoVision: state.settings.autoVision, revision: state.revision,
           readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()), mode: state.settings.mode,
@@ -194,11 +196,19 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       });
     }
     case 'translate': {
-      if (!enabled || state.revision !== cmd.payload.revision) throw new Error('Translation settings changed. Try again.');
+      if (state.revision !== cmd.payload.revision || !await enabled()) throw new Error('Translation settings changed. Try again.');
+      const settings = await authorizedModel(pageSettings(state, page.origin));
+      let items = cmd.payload.items;
+      if (settings.skipReadingLanguage && settings.mode !== 'manual') {
+        const skip = await Promise.all(items.map(({ text }) => alreadyInReadingLanguage(text, settings.readingLanguage)));
+        items = items.filter((_item, index) => !skip[index]);
+      }
+      if (!items.length) return [];
+      if ((await readState()).revision !== state.revision) throw new Error('Translation settings changed. Try again.');
       if (translations >= 3) throw new Error('The translation provider is busy. New messages will be prioritized.');
       translations++;
       try {
-        return await tasks.translate(await authorizedModel(pageSettings(state, page.origin)), cmd.payload.items);
+        return await tasks.translate(settings, items);
       } finally {
         translations--;
       }
@@ -234,6 +244,8 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
     case 'getRoom':
       requireRoom(cmd.payload);
       return state.roomPreferences[cmd.payload] ?? null;
+    case 'resolveRoomLanguage':
+      return tasks.resolveRoomLanguage(await authorizedModel(state.settings), cmd.payload);
     case 'setRoom': {
       const { key, language } = cmd.payload;
       requireRoom(key);
@@ -244,7 +256,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       requireRoom(key);
       const existing = state.roomPreferences[key];
       if (existing) return { preference: existing };
-      if (!enabled) throw new Error('Enable this site before sending room samples to your model.');
+      if (!await enabled()) throw new Error('Enable this page or room before sending room samples to your model.');
       if (checksInFlight.has(key)) throw new Error('Language identification is already running.');
       checksInFlight.add(key);
       try {
@@ -314,8 +326,11 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
       return promptContext(page);
     }
     case 'setTranslateEmoji':
+    case 'setSkipReadingLanguage':
       await editState(state => ({
-        changes: { settings: { ...state.settings, translateEmoji: cmd.payload }, revision: state.revision + 1 },
+        changes: { settings: { ...state.settings,
+          [cmd.kind === 'setTranslateEmoji' ? 'translateEmoji' : 'skipReadingLanguage']: cmd.payload,
+        }, revision: state.revision + 1 },
         result: undefined,
       }));
       refreshPages();
@@ -383,20 +398,35 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
       const tabId = cmd.kind === 'setSite' ? cmd.payload.tabId : cmd.payload;
       const page = webUrl((await chrome.tabs.get(tabId)).url);
       const origin = page.origin;
-      const youtube = isYouTube(page.hostname) && page.protocol === 'https:';
       if (cmd.kind === 'attach') return attach(tabId, page);
       if (cmd.kind === 'setSite') {
-        if (cmd.payload.origin !== origin) throw new Error('The site changed. Reopen the toolbar menu before enabling translation.');
-        const enabled = cmd.payload.enabled;
-        await editState(state => ({
-          changes: { enabledSites: [...new Set(enabled ? [...state.enabledSites, origin] : state.enabledSites.filter(site => site !== origin))] },
-          result: undefined,
-        }));
+        const { scope, key, enabled } = cmd.payload;
+        const state = await readState();
+        const target = (await scopeOptions(page, state.enabledSites, state.scopeOverrides)).find(option => option.scope === scope);
+        if (cmd.payload.origin !== origin || !target || (scope !== 'site' && target.key !== key)) {
+          throw new Error('页面已切换，请关闭并重新打开工具栏。');
+        }
+        await editState(latest => {
+          if (scope === 'site') {
+            const enabledSites = latest.enabledSites.filter(site => site !== origin);
+            if (enabled) enabledSites.push(origin);
+            return { changes: { enabledSites, revision: latest.revision + 1 }, result: undefined };
+          }
+          const overrides = { ...latest.scopeOverrides };
+          delete overrides[target.key];
+          if (enabled !== null) overrides[target.key] = enabled;
+          return { changes: { scopeOverrides: Object.fromEntries(Object.entries(overrides).slice(-500)),
+            revision: latest.revision + 1 }, result: undefined };
+        });
         refreshPages();
-        return { origin, enabled, youtube, translateEmoji: (await readState()).settings.translateEmoji } satisfies SiteState;
       }
       const state = await readState();
-      return { origin, enabled: state.enabledSites.includes(origin), youtube, translateEmoji: state.settings.translateEmoji } satisfies SiteState;
+      return {
+        origin, youtube: isYouTube(page.hostname) && page.protocol === 'https:',
+        translateEmoji: state.settings.translateEmoji, skipReadingLanguage: state.settings.skipReadingLanguage,
+        readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()),
+        scopes: await scopeOptions(page, state.enabledSites, state.scopeOverrides),
+      } satisfies SiteState;
     }
   }
   throw new Error('Unsupported settings command.');

@@ -2,6 +2,7 @@ import { isYouTube } from '../platform/config';
 import { send, type PageSnapshot } from '../platform/messages';
 import { RoomLanguage } from '../rooms/language';
 import { roomLocation } from '../rooms/metadata';
+import { languageName, normalizeLanguage } from '../rooms/language-input';
 import type { ChatRule, RuleMatch } from '../rules/schema';
 import { PageMeter } from '../usage/page-meter';
 import { testRule, invalidateSelector, type RuleTest } from './dom';
@@ -274,27 +275,31 @@ export function startLiveChat(signal: AbortSignal) {
         looking = false;
         preparePicker().close();
         const info = current.context();
-        const format = (code: string | null) => {
-          if (!code) return '回复语言尚未设置';
-          try {
-            const name = new Intl.DisplayNames('zh-CN', { type: 'language' }).of(code);
-            return name === code ? code : name + '（' + code + '）';
-          } catch { return code; }
-        };
+        const format = (code: string | null) => code ? languageName(code) + '（' + code + '）' : '回复语言尚未设置';
         panel!.show('当前直播间', [info.title, info.streamer, lastError, format(preference?.language ?? null)].filter(Boolean).join(' · '));
         const value = panel!.languageInput(preference?.language ?? null);
-        panel!.button('保存语言', () => {
-          let code: string | undefined;
-          try {
-            const input = value.value.trim();
-            [code] = Intl.getCanonicalLocales(input.toLowerCase() === 'jp' ? 'ja' : input);
-          } catch { /* Invalid language tags are handled below. */ }
-          if (!code || code.length > 48) {
-            panel!.note('请填写语言代码，例如 ja 或 zh-CN。');
+        panel!.button('保存语言', button => {
+          const input = value.value.trim();
+          if (!input) {
+            panel!.note('请输入语言名称，例如日语。');
             return;
           }
-          value.value = code;
-          void current.set(code).then(() => panel?.note('已保存。' + format(code)), error => panel?.note(String(error.message)));
+          button.disabled = true;
+          void (async () => {
+            let code = normalizeLanguage(input);
+            if (!code) {
+              panel!.note('正在让模型识别你输入的语言名称…');
+              code = (await send('resolveRoomLanguage', input)) ?? undefined;
+            }
+            if (!value.isConnected || language !== current) return;
+            if (!code) { panel?.note('未能确认语言，请填写语言名称，例如日语。'); return; }
+            await current.set(code);
+            value.value = code;
+            if (value.isConnected) panel?.note('已保存。' + format(code));
+          })().catch(error => {
+            if (value.isConnected) panel?.note('无法确认语言。可直接填写常用名称，例如日语或英语。' +
+              (error instanceof Error ? ' ' + error.message : ''));
+          }).finally(() => { button.disabled = false; });
         });
         panel!.button('清除记忆', () => { void current.set(null).then(() => { value.value = ''; panel?.note('已清除。'); }); });
         panel!.button('关闭', () => picker!.close());

@@ -8,6 +8,14 @@
 body { margin: 0; }
 .popup { width: 330px; }
 .popup main { padding: 16px; }
+.popup .brand { margin-bottom: 12px; }
+.popup-group { border-top: 1px solid light-dark(#d3ddeb, #445269); padding: 10px 0; }
+.popup-group h2 { font-size: 14px; margin: 0 0 6px; }
+.popup-group p { font-size: 12px; }
+.popup-group .scope-label { display: flex; align-items: center; gap: 10px; }
+.popup-group select { flex: 1; width: auto; }
+.popup #scope-help:empty { display: none; }
+.popup-footer button:first-child { margin-right: auto; }
 .options { max-width: 960px; padding: 28px; margin: 0 auto; }
 .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
 .brand h1 { margin: 0; }

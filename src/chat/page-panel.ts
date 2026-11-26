@@ -81,8 +81,8 @@ export class PagePanel {
     label.textContent = '回复语言 ';
     const input = this.document.createElement('input');
     input.value = initial ?? '';
-    input.placeholder = 'ja / en / zh-CN';
-    input.maxLength = 48;
+    input.placeholder = '例如日语、Japanese、jp';
+    input.maxLength = 80;
     label.append(input);
     this.panel.append(label);
     return input;
