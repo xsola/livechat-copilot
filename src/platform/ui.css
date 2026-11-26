@@ -8,11 +8,14 @@
 body { margin: 0; }
 .popup { width: 330px; }
 .popup main { padding: 16px; }
-.options { max-width: 720px; padding: 24px; margin: 0 auto; }
+.options { max-width: 960px; padding: 28px; margin: 0 auto; }
+.brand { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.brand h1 { margin: 0; }
+.brand h1 span { color: light-dark(#596684, #aab7d2); font-weight: 500; }
 h1 { font-size: 21px; margin: 0 0 12px; }
 h2 { font-size: 17px; margin: 0 0 12px; }
 p { margin: 8px 0; }
-section { border: 1px solid light-dark(#d3ddeb, #445269); border-radius: 8px; padding: 16px; margin: 12px 0; }
+section { border: 1px solid light-dark(#d3ddeb, #445269); border-radius: 12px; padding: 20px; margin: 14px 0; background: light-dark(#fff, #1e2533); }
 label { display: block; margin: 8px 0; }
 input:not([type=checkbox]), textarea, select { display: block; width: 100%; margin: 4px 0; padding: 6px; }
 input, textarea, select, button {
@@ -29,6 +32,25 @@ button { padding: 5px 10px; cursor: pointer; }
 button:disabled { cursor: default; opacity: .6; }
 .primary { background: #2659a7; color: white; border-color: #2659a7; }
 .actions, .field-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.field-row label { flex: 1; min-width: 120px; }
+.field-row { gap: 14px; }
+.field-row label { flex: 1; min-width: 225px; }
 .secondary { color: light-dark(#4a5d79, #bac6d9); }
-#status, #usage-status { overflow-wrap: anywhere; }
+.model-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, .65fr); align-items: start; gap: 26px; }
+.model-actions { margin-top: 15px; gap: 8px; }
+.model-test { padding: 14px 16px; margin-top: 8px; border-radius: 9px; background: light-dark(#f1f4ff, #262e43); }
+.model-test h3 { margin: 0; font-size: 14px; }
+.model-test dl { margin: 6px 0 10px; }
+.model-test dl div { display: flex; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid light-dark(#d9e1f6, #414d69); }
+.model-test dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.model-test p { margin-bottom: 0; }
+.model-details { margin-top: 14px; padding-top: 12px; border-top: 1px solid light-dark(#d3ddeb, #445269); }
+.model-details summary { cursor: pointer; }
+#status, #usage-status, #test-detail { overflow-wrap: anywhere; }
+#status:empty, #image-status:empty, #preferences-status:empty { display: none; }
+@media (max-width: 640px) {
+  .options { padding: 16px; }
+  section { padding: 14px; }
+  .model-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .model-test { margin-top: 0; }
+  .field-row label { min-width: min(100%, 220px); }
+}

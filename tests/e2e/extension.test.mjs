@@ -29,8 +29,9 @@ async function boot(t) {
     }
     const items = command.items ?? [];
     if (items.some(item => item.text === 'Slow original')) await new Promise(resolve => setTimeout(resolve, 900));
-    const output = Array.isArray(content) ? { verdict: 'likely-chat', reason: 'Synthetic region confirmed.',
-      composerVerdict: command.sample.editorImage ? 'likely-composer' : undefined }
+    const output = command.test === 'image-capability' ? { color: 'blue' }
+      : Array.isArray(content) ? { verdict: 'likely-chat', reason: 'Synthetic region confirmed.',
+        composerVerdict: command.sample.editorImage ? 'likely-composer' : undefined }
       : items.length ? { translations: items.map(({ id, text }) => ({ id, text: '译：' + text })) }
       : command.check ? { ok: true } : { language: 'en', title: null, streamer: null, category: null };
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
@@ -114,6 +115,8 @@ test('the visible dist directory loads without modifying the manifest', { timeou
   const manifest = JSON.parse(await readFile(path.join(unpacked, 'manifest.json'), 'utf8'));
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.host_permissions.includes('<all_urls>'), false);
+  assert.equal(manifest.action.default_icon['16'], 'icons/icon-16.png');
+  assert.equal((await readFile(path.join(unpacked, manifest.icons['128']))).readUInt32BE(16), 128);
   const root = await mkdtemp(path.join(tmpdir(), 'livechat-copilot-install-'));
   let context;
   t.after(async () => {
@@ -159,6 +162,7 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await chat.getByText('译：Fresh content').waitFor();
   assert.equal(await chat.getByText('译：Slow original').count(), 0);
 
+  await options.getByText('图像复核与兼容性', { exact: true }).click();
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -231,19 +235,17 @@ test('new site candidates and a staged community rule roll back to the last usab
       }] }));
     };
   });
-  await options.locator('#registry').fill('https://raw.githubusercontent.com/fixture/rules/main/rules/index.json');
-  await options.getByRole('button', { name: '保存并授权' }).click();
-  await options.getByText('社区规则：0 条已验证，1 条待验证。').waitFor();
+  const { settings } = await command(options, 'getSettings');
+  await command(options, 'saveSettings', { ...settings, registryUrl: 'https://raw.githubusercontent.com/fixture/rules/main/rules/index.json' });
+  assert.equal((await command(options, 'syncRegistry')).staged, 1);
   await command(options, 'setSite', { tabId: tab, enabled: true, origin: local });
   await live.getByText('译：New tournament', { exact: true }).waitFor();
   await until(async () => (await command(options, 'getSettings')).rules.active === 1);
   await worker.evaluate(() => { globalThis.fixtureVersion = 2; });
-  await options.locator('#sync').click();
-  await options.getByText('社区规则：1 条已验证，1 条待验证。').waitFor();
+  assert.equal((await command(options, 'syncRegistry')).staged, 1);
   await action(options, tab, 'refresh');
   await until(async () => (await command(options, 'getSettings')).rules.staged === 0);
-  await options.locator('#sync').click();
-  await options.getByText('社区规则：1 条已验证，0 条待验证。').waitFor();
+  assert.equal((await command(options, 'syncRegistry')).staged, 0);
   await live.reload();
   await live.getByText('译：New tournament', { exact: true }).waitFor();
 });
@@ -251,6 +253,7 @@ test('new site candidates and a staged community rule roll back to the last usab
 test('an endpoint that rejects images disables later visual checks while text translation still works', { timeout: 45_000 }, async t => {
   const { context, options, requestLog } = await boot(t);
   await options.locator('#model').fill('test-text-only');
+  await options.getByText('图像复核与兼容性', { exact: true }).click();
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -270,6 +273,38 @@ test('an endpoint that rejects images disables later visual checks while text tr
   await command(options, 'setSite', { tabId: tab, enabled: true, origin: 'https://www.youtube.com' });
   await chat.getByText('译：Amazing comeback 🎉').waitFor();
   await options.reload();
+  await options.getByText('图像复核与兼容性', { exact: true }).click();
   await options.getByText('当前模型接口不支持图片输入', { exact: false }).waitFor();
   assert.equal(await options.locator('#auto-vision').isDisabled(), true);
+});
+
+test('settings test unsaved model fields and keep the browser language as the default', { timeout: 40_000 }, async t => {
+  const { options, requestLog } = await boot(t);
+  const { settings, browserLanguage } = await command(options, 'getSettings');
+  assert.equal(settings.readingLanguage, '');
+  const locale = await options.evaluate(() => Intl.getCanonicalLocales(chrome.i18n.getUILanguage().replaceAll('_', '-'))[0]);
+  assert.equal(browserLanguage, locale);
+  assert.equal(await options.locator('#language').getAttribute('placeholder'), locale);
+  assert.equal(await options.getByRole('heading', { name: '社区规则' }).count(), 0);
+  await options.locator('#model').fill('unsaved-draft-model');
+  await options.getByRole('button', { name: '测试当前模型' }).click();
+  await options.getByText('连接正常', { exact: true }).waitFor();
+  assert.equal(await options.locator('#test-image').innerText(), '支持');
+  assert.match(await options.locator('#test-latency').innerText(), /^\d+ ms$/);
+  assert.equal((await command(options, 'getSettings')).settings.model.model, 'test-model');
+  assert.equal(requestLog.length, 2);
+  assert.ok(requestLog.every(body => body.model === 'unsaved-draft-model'));
+  assert.equal(JSON.parse(requestLog[0].messages[1].content).targetLanguage, locale);
+  await options.locator('#model').fill('test-text-only');
+  await options.getByRole('button', { name: '测试当前模型' }).click();
+  await options.getByText('不支持', { exact: true }).waitFor();
+  assert.equal(await options.locator('#test-connection').innerText(), '连接正常');
+  await options.locator('#language').fill('ja');
+  await options.locator('#mode').selectOption('single');
+  await options.getByText('每条弹幕单独发起请求', { exact: false }).waitFor();
+  await options.getByRole('button', { name: '保存翻译偏好' }).click();
+  await options.getByText('翻译偏好已保存。', { exact: true }).waitFor();
+  const updated = (await command(options, 'getSettings')).settings;
+  assert.equal(updated.readingLanguage, 'ja');
+  assert.equal(updated.model.model, 'test-model');
 });

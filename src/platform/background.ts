@@ -4,7 +4,7 @@ import { resolveRules, decideRule } from '../rules/resolver';
 import { summarizeRules, syncRegistry } from '../rules/registry';
 import { ruleMatches } from '../rules/schema';
 import { updateUsage } from '../usage/usage';
-import { hostPattern, isTextOnlyModel, isYouTube, parseEndpoint, parseRegistry, type Settings } from './config';
+import { hostPattern, isTextOnlyModel, isYouTube, parseEndpoint, parseRegistry, readingLanguage, type Settings } from './config';
 import { editState, readState, type State } from './store';
 import type { RoomPreference } from './store';
 import { captureCandidate } from './capture';
@@ -12,7 +12,7 @@ import { parseCommand, type SiteState } from './messages';
 
 type Command = NonNullable<ReturnType<typeof parseCommand>>;
 const uiOnly = new Set<Command['kind']>([
-  'getSettings', 'saveSettings', 'connection', 'syncRegistry', 'usageSummary',
+  'getSettings', 'saveSettings', 'saveModelSettings', 'saveReadingSettings', 'probeModel', 'syncRegistry', 'usageSummary',
   'clearUsage', 'removeRule', 'site', 'setSite', 'attach',
 ]);
 const registryAlarm = 'refresh-community-rules';
@@ -75,7 +75,7 @@ async function authorizedModel(settings: Settings) {
   if (!await chrome.permissions.contains({ origins: [hostPattern(url)] })) {
     throw new Error('Grant access to your model endpoint in Settings.');
   }
-  return settings;
+  return { ...settings, readingLanguage: readingLanguage(settings.readingLanguage, chrome.i18n.getUILanguage()) };
 }
 
 function refreshPages() {
@@ -132,7 +132,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
         settings: {
           enabled, modelConfigured: granted, imageInput: state.settings.model.imageInput && !imageUnavailable(state),
           autoVision: state.settings.autoVision, revision: state.revision,
-          readingLanguage: state.settings.readingLanguage, mode: state.settings.mode,
+          readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()), mode: state.settings.mode,
         },
         rules: resolveRules(page, frame, state.localRules, state.community),
       };
@@ -245,21 +245,29 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
   switch (cmd.kind) {
     case 'getSettings': {
       const state = await readState();
-      return { settings: state.settings, rules: summarizeRules(state), imageUnavailable: imageUnavailable(state) };
+      return {
+        settings: state.settings, browserLanguage: readingLanguage('', chrome.i18n.getUILanguage()),
+        rules: summarizeRules(state), imageUnavailable: imageUnavailable(state),
+      };
     }
-    case 'saveSettings': {
-      parseEndpoint(cmd.payload.model.endpoint);
-      if (cmd.payload.registryUrl) parseRegistry(cmd.payload.registryUrl);
-      await editState(state => ({
-        changes: {
-          settings: cmd.payload,
-          revision: state.revision + 1,
-          ...(!state.settings.model.imageInput && cmd.payload.model.imageInput ? { rejectedVisionModel: null } : {}),
-          ...(state.settings.registryUrl === cmd.payload.registryUrl ? {} :
-            { community: { active: [], staged: [], rejected: {} } }),
-        },
-        result: undefined,
-      }));
+    case 'saveSettings':
+    case 'saveModelSettings':
+    case 'saveReadingSettings': {
+      await editState(state => {
+        const settings = { ...state.settings, ...cmd.payload };
+        parseEndpoint(settings.model.endpoint);
+        if (settings.registryUrl) parseRegistry(settings.registryUrl);
+        return {
+          changes: {
+            settings,
+            revision: state.revision + 1,
+            ...(!state.settings.model.imageInput && settings.model.imageInput ? { rejectedVisionModel: null } : {}),
+            ...(state.settings.registryUrl === settings.registryUrl ? {} :
+              { community: { active: [], staged: [], rejected: {} } }),
+          },
+          result: undefined,
+        };
+      });
       refreshPages();
       return;
     }
@@ -267,9 +275,23 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
       await editState(state => ({ changes: { localRules: state.localRules.filter(rule => rule.id !== cmd.payload) }, result: undefined }));
       refreshPages();
       return;
-    case 'connection':
-      await tasks.check(await authorizedModel((await readState()).settings));
-      return;
+    case 'probeModel': {
+      const { settings } = await readState();
+      const probeSettings = await authorizedModel({ ...settings, ...cmd.payload });
+      const result = await tasks.probe(probeSettings);
+      if (result.image === 'supported') {
+        const cleared = await editState(state => {
+          const model = state.settings.model;
+          const tested = probeSettings.model;
+          const matchesSaved = model.endpoint === tested.endpoint && model.model === tested.model &&
+            model.apiKey === tested.apiKey && model.jsonMode === tested.jsonMode;
+          const clear = matchesSaved && state.rejectedVisionModel === imageModelKey(probeSettings);
+          return { changes: clear ? { rejectedVisionModel: null } : {}, result: clear };
+        });
+        if (cleared) refreshPages();
+      }
+      return result;
+    }
     case 'syncRegistry': {
       const result = await syncRegistry();
       return result;

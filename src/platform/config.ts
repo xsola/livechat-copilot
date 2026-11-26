@@ -13,7 +13,7 @@ export type ModelConfig = z.infer<typeof modelConfig>;
 
 export const settingsSchema = z.strictObject({
   model: modelConfig,
-  readingLanguage: languageCode,
+  readingLanguage: z.union([languageCode, z.literal('')]),
   mode: z.enum(['batch', 'single', 'manual']),
   prompt: z.string().max(2000),
   registryUrl: z.string().max(500),
@@ -36,12 +36,23 @@ export const defaults: Settings = {
     imageInput: true,
     jsonMode: true,
   },
-  readingLanguage: 'zh-CN',
+  readingLanguage: '',
   mode: 'batch',
   prompt: defaultPrompt,
   registryUrl: '',
   autoVision: false,
 };
+
+export function readingLanguage(preference: string, browserLocale: string) {
+  if (preference) return preference;
+  try {
+    const [locale] = Intl.getCanonicalLocales(browserLocale.replaceAll('_', '-'));
+    if (locale && languageCode.safeParse(locale).success) return locale;
+  } catch {
+    // Fall back if Chrome does not return a usable UI locale.
+  }
+  return 'en';
+}
 
 export function isTextOnlyModel(model: Pick<ModelConfig, 'endpoint' | 'model'>) {
   try {

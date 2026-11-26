@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { languageCode, settingsSchema, type PageSettings, type Settings } from './config';
+import { languageCode, modelConfig, settingsSchema, type PageSettings, type Settings } from './config';
 import { chatRule, type RuleMatch } from '../rules/schema';
 import { pageCounter, type DailyUsage } from '../usage/usage';
 import type { RoomPreference } from './store';
-import type { RoomProfile, TranslationItem, VisionAdvice } from '../models/tasks';
+import type { ModelProbe, RoomProfile, TranslationItem, VisionAdvice } from '../models/tasks';
 
 const id = z.string().min(1).max(100);
 const roomKey = z.string().min(1).max(300);
@@ -35,7 +35,9 @@ const payloads = {
   usage: z.partialRecord(pageCounter, z.number().int().positive().max(10000)),
   getSettings: z.undefined(),
   saveSettings: settingsSchema,
-  connection: z.undefined(),
+  saveModelSettings: settingsSchema.pick({ model: true, autoVision: true }),
+  saveReadingSettings: settingsSchema.pick({ readingLanguage: true, mode: true, prompt: true }),
+  probeModel: z.object({ model: modelConfig, readingLanguage: z.union([languageCode, z.literal('')]) }),
   syncRegistry: z.undefined(),
   usageSummary: z.undefined(),
   clearUsage: z.undefined(),
@@ -68,9 +70,11 @@ interface Results {
   translate: TranslationItem[];
   verify: VisionAdvice;
   usage: void;
-  getSettings: { settings: Settings; rules: RuleSummary; imageUnavailable: boolean };
+  getSettings: { settings: Settings; browserLanguage: string; rules: RuleSummary; imageUnavailable: boolean };
   saveSettings: void;
-  connection: void;
+  saveModelSettings: void;
+  saveReadingSettings: void;
+  probeModel: ModelProbe;
   syncRegistry: RuleSummary;
   usageSummary: DailyUsage[];
   clearUsage: void;

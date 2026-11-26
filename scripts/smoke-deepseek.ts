@@ -11,7 +11,7 @@ async function main() {
   }
   const apiKey = (readKey ? buffer : process.env.DEEPSEEK_API_KEY)?.trim();
   if (!apiKey) throw new Error('Set DEEPSEEK_API_KEY in your process or pass the key through stdin with --stdin.');
-  const settings = { ...defaults, model: { ...defaults.model, apiKey } };
+  const settings = { ...defaults, readingLanguage: 'zh-CN', model: { ...defaults.model, apiKey } };
   const meter: Meter = async (task, success, elapsed, usage) => {
     console.log(JSON.stringify({ task, success, elapsed, ...usage }));
   };

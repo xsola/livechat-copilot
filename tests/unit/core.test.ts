@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { alignTranslations, createTasks } from '../../src/models/tasks';
 import { generateDraft } from '../../src/agent/tasks/draft';
-import { defaults, parseEndpoint, parseRegistry } from '../../src/platform/config';
+import { defaults, parseEndpoint, parseRegistry, readingLanguage } from '../../src/platform/config';
 import { parseCommand } from '../../src/platform/messages';
 import { decideRule, resolveRules, stageRules } from '../../src/rules/resolver';
 import { ruleIndex, type ChatRule } from '../../src/rules/schema';
@@ -16,6 +16,12 @@ const seed: ChatRule = {
 const state = { active: [seed], staged: [], rejected: {} };
 const page = new URL('https://www.youtube.com/watch?v=fixture');
 const frame = new URL('https://www.youtube.com/live_chat?v=fixture');
+
+test('reading language follows Chrome unless the user overrides it', () => {
+  assert.equal(readingLanguage('', 'pt_BR'), 'pt-BR');
+  assert.equal(readingLanguage('ja', 'pt-BR'), 'ja');
+  assert.equal(readingLanguage('', ''), 'en');
+});
 
 test('local rules outrank staged, active and bundled rules', () => {
   const second = { ...seed, version: 2, body: '.new-body' };
