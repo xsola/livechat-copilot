@@ -37,8 +37,14 @@ export class Picker {
     this.searching = true;
     this.searchEpoch++;
     this.panel.highlight();
-    this.panel.show('正在识别弹幕区', '正在检查页面结构和重复出现的弹幕。');
-    this.panel.button('关闭', () => this.close());
+    this.panel.show('正在识别弹幕区', '识别完成后会标出弹幕区。你可以随时取消。');
+    this.panel.setBusy(true);
+    this.searchProgress('正在检查已有规则…');
+    this.panel.button('取消识别', () => this.close());
+  }
+
+  searchProgress(text: string) {
+    if (this.searching) this.panel.note(text);
   }
 
   isSearching() {
@@ -49,9 +55,7 @@ export class Picker {
     if (!this.searching) return;
     this.searching = false;
     this.panel.highlight();
-    this.panel.show('未找到弹幕区', reason + '可以点一条确实来自聊天的消息，让插件继续查找。');
-    this.panel.button('点一条弹幕正文', () => this.start(true));
-    this.panel.button('手动选整个弹幕区', () => this.start());
+    this.panel.show('未找到弹幕区', reason + '可从工具栏打开「手动选择弹幕区」。');
     this.panel.button('关闭', () => this.close());
   }
 
@@ -73,7 +77,7 @@ export class Picker {
       } catch { return []; }
     });
     if (!visible.length) { this.noCandidate(); return; }
-    this.panel.note('正在让模型对照候选区域截图和弹幕样本…');
+    this.searchProgress('正在让模型对照候选区域截图和弹幕样本…');
     try {
       await this.hideForCapture();
       if (!this.searching || this.searchEpoch !== attempt) return;
@@ -136,7 +140,9 @@ export class Picker {
       event.preventDefault();
       event.stopPropagation();
       if (event.key === 'Enter') { choose(); return; }
-      if (event.key === 'ArrowUp' && this.selected.parentElement && this.selected.parentElement !== document.documentElement) {
+      const previous = this.selected;
+      if (event.key === 'ArrowUp' && this.selected.parentElement && this.selected.parentElement !== document.documentElement &&
+        (!initial || this.selected.parentElement !== document.body)) {
         this.selected = this.selected.parentElement;
       } else if (event.key === 'ArrowDown' && this.cursor) {
         let descendant: Element | null = this.cursor;
@@ -144,7 +150,12 @@ export class Picker {
         if (descendant?.parentElement === this.selected) this.selected = descendant;
       }
       this.panel.highlight(this.selected, Boolean(initial));
-      if (initial) this.panel.note('');
+      if (initial) {
+        const { width, height } = this.selected.getBoundingClientRect();
+        const change = event.key === 'ArrowUp' ? '扩大' : '缩小';
+        this.panel.note(this.selected === previous ? '这个方向没有可调整的层级。' :
+          '已' + change + '一层（' + Math.round(width) + ' × ' + Math.round(height) + ' 像素）。');
+      }
     };
     document.addEventListener('keydown', handleKey, options);
     if (window.top !== window) window.top?.document.addEventListener('keydown', handleKey, options);
@@ -171,7 +182,7 @@ export class Picker {
     if (!node.isConnected) { this.panel.note('页面已变化，请重新选择。'); return; }
     const candidate = body ? candidateFromExample(document, node, this.page, this.frame)
       : candidateFrom(document, node, this.page, this.frame) ?? (adjusted ? undefined : candidateFromExample(document, node, this.page, this.frame));
-    if (candidate) { this.preview(candidate); return; }
+    if (candidate) { this.preview(candidate, undefined, adjusted); return; }
     if (adjusted) {
       this.panel.note('当前框内没有提取到多条弹幕。请按 ↑ 或 ↓ 继续调整。');
       return;
@@ -184,7 +195,7 @@ export class Picker {
     this.panel.button('关闭', () => this.close());
   }
 
-  private preview(candidate: Candidate, automatic?: { source?: string; located?: boolean; excludeComposer?: boolean; localOnly?: boolean }) {
+  private preview(candidate: Candidate, automatic?: { source?: string; located?: boolean; excludeComposer?: boolean; localOnly?: boolean }, adjusted = false) {
     this.endListeners();
     this.searching = false;
     candidate = {
@@ -192,7 +203,7 @@ export class Picker {
       rule: automatic?.excludeComposer ? candidate.rule : completeCandidateRule(document, candidate.container, candidate.rule),
     };
     this.showing = candidate;
-    this.panel.highlight(candidate.container, Boolean(automatic));
+    this.panel.highlight(candidate.container, Boolean(automatic) || adjusted);
     const { state, button } = composerElements(candidate);
     const controls = state === 'editable'
       ? (button ? '已找到输入区和发送按钮。' : '已找到可编辑输入区，发送按钮暂未识别。')
@@ -205,6 +216,12 @@ export class Picker {
       this.panel.showAnchored('已识别弹幕区', source
         ? '绿框标出弹幕区。当前使用' + (sources[source] ?? source) + '。' + controls
         : '请核对绿框位置。框住弹幕区就可以保存。' + controls);
+    } else if (adjusted) {
+      this.panel.showAnchored('核对弹幕样本', '下面是从调整后的绿框内读到的消息。' + controls, candidate);
+    } else {
+      this.panel.show('核对弹幕样本', '下面是从候选区读到的消息。样本正确就可保存。' + controls, candidate);
+    }
+    if (automatic || adjusted) {
       this.panel.button('调整框选范围', () => this.start(false, candidate));
       const { signal } = this.controller = new AbortController();
       const dismiss = (event: KeyboardEvent) => {
@@ -214,8 +231,6 @@ export class Picker {
       };
       document.addEventListener('keydown', dismiss, { capture: true, signal });
       if (window.top !== window) window.top?.document.addEventListener('keydown', dismiss, { capture: true, signal });
-    } else {
-      this.panel.show('核对弹幕样本', '下面是从候选区读到的消息。样本正确就可保存。' + controls, candidate);
     }
     if (!source) {
       this.panel.button('保存并启用规则', button => {
@@ -226,8 +241,10 @@ export class Picker {
         });
       });
     }
-    this.panel.button('点一条弹幕正文', () => this.start(true));
-    this.panel.button('手动选整个弹幕区', () => this.start());
+    if (!automatic && !adjusted) {
+      this.panel.button('点一条弹幕正文', () => this.start(true));
+      this.panel.button('手动选整个弹幕区', () => this.start());
+    }
     this.panel.button('关闭', () => this.close());
     if (!candidate.messages.length) {
       this.panel.note('暂无正文样本，先使用本地规则。');

@@ -195,7 +195,7 @@ function showPrompt() {
     : '重置后，这项任务会使用插件内置的默认提示词。';
   element('prompt-context').textContent = [
     promptContext.origin ? '当前网站 ' + promptContext.origin : '全局默认',
-    promptContext.title, promptContext.model, '阅读语言 ' + promptContext.readingLanguage,
+    promptContext.title, promptContext.model, '翻译目标语言 ' + promptContext.readingLanguage,
   ].filter(Boolean).join(' · ');
 }
 

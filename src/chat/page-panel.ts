@@ -8,6 +8,7 @@ const styles = [
   '.hover{position:fixed;pointer-events:none;z-index:2147483646;outline:2px solid #1761df;background:#3187ff26;box-sizing:border-box}',
   '.hover.detected{outline:3px solid #16a34a;outline-offset:-3px;background:rgb(34 197 94 / 16%);box-shadow:inset 0 0 0 4px #fffc}',
   'strong{display:block;font-size:14px}p{margin:7px 0}ul{margin:7px 0;padding-left:19px}li{overflow-wrap:anywhere}',
+  '.busy strong::before{content:"";display:inline-block;width:.75em;height:.75em;margin-right:.55em;border:2px solid #cedcf0;border-top-color:#1761df;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(1turn)}}@media (prefers-reduced-motion:reduce){.busy strong::before{animation:none}}',
   'button,input{font:inherit;margin:4px 5px 0 0;padding:4px 7px;border:1px solid #5686c8;border-radius:5px;background:#f2f7ff;color:#192943}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible{outline:2px solid #2164c4}',
 ].join('\n');
 
@@ -103,7 +104,7 @@ export class PagePanel {
   }
 
   show(title: string, description: string, candidate?: Candidate) {
-    this.panel.classList.remove('bottom-left', 'anchored');
+    this.panel.classList.remove('bottom-left', 'anchored', 'busy');
     this.panel.style.removeProperty('left');
     this.panel.style.removeProperty('top');
     this.panel.hidden = false;
@@ -130,8 +131,8 @@ export class PagePanel {
     this.panel.classList.add('bottom-left');
   }
 
-  showAnchored(title: string, description: string) {
-    this.show(title, description);
+  showAnchored(title: string, description: string, candidate?: Candidate) {
+    this.show(title, description, candidate);
     this.panel.classList.add('anchored');
     this.position();
   }
@@ -159,6 +160,10 @@ export class PagePanel {
 
   note(text: string) {
     this.status.textContent = text;
+  }
+
+  setBusy(busy: boolean) {
+    this.panel.classList.toggle('busy', busy);
   }
 
   captureVisibility(visible: boolean) {

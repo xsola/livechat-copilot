@@ -10,7 +10,11 @@
       <label class="check"><input type="checkbox" id="enabled" disabled> 在所选范围启用弹幕翻译</label>
       <p id="scope-help" class="secondary"></p>
       <button type="button" id="reset-scope" hidden>跟随全站设置</button>
-      <label class="check"><input type="checkbox" id="skip-reading" disabled> <span id="skip-label">跳过已是阅读语言的弹幕</span></label>
+    </div>
+    <div class="popup-group">
+      <h2>翻译偏好</h2>
+      <label class="scope-label">翻译成 <select id="target-language" disabled></select></label>
+      <label class="check"><input type="checkbox" id="skip-reading" disabled> <span id="skip-label">自动翻译时跳过已是目标语言的弹幕</span></label>
       <label class="check"><input type="checkbox" id="translate-emoji" disabled> 翻译表情（所有直播间）</label>
       <p class="secondary">需要翻译的弹幕正文会发送给你配置的模型。</p>
     </div>

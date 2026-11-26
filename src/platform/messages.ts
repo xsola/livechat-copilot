@@ -54,6 +54,7 @@ const payloads = {
   }),
   setTranslateEmoji: z.boolean(),
   setSkipReadingLanguage: z.boolean(),
+  setTargetLanguage: settingsSchema.shape.readingLanguage,
   setPreferredScope: z.object({ tabId: z.number().int().nonnegative(), origin: z.string().max(350), scope: scopeType }),
   promptContext: z.number().int().nonnegative().optional(),
   savePrompt: z.object({
@@ -89,6 +90,8 @@ export interface SiteState {
   translateEmoji: boolean;
   skipReadingLanguage: boolean;
   readingLanguage: string;
+  targetLanguage: string;
+  browserLanguage: string;
   preferredScope: TranslationScope | null;
   scopes: ScopeOption[];
 }
@@ -122,6 +125,7 @@ interface Results {
   pageCommand: boolean;
   setTranslateEmoji: void;
   setSkipReadingLanguage: void;
+  setTargetLanguage: string;
   setPreferredScope: void;
   promptContext: PromptContext;
   savePrompt: PromptContext;

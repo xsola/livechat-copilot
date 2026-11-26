@@ -17,7 +17,7 @@ type Command = NonNullable<ReturnType<typeof parseCommand>>;
 const uiOnly = new Set<Command['kind']>([
   'getSettings', 'saveSettings', 'saveModelSettings', 'saveReadingSettings', 'probeModel', 'syncRegistry', 'usageSummary',
   'clearUsage', 'removeRule', 'site', 'setSite', 'attach', 'pageCommand', 'setTranslateEmoji', 'setSkipReadingLanguage',
-  'setPreferredScope', 'promptContext', 'savePrompt',
+  'setPreferredScope', 'setTargetLanguage', 'promptContext', 'savePrompt',
 ]);
 const registryAlarm = 'refresh-community-rules';
 const checksInFlight = new Set<string>();
@@ -363,6 +363,13 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
       }));
       refreshPages();
       return;
+    case 'setTargetLanguage':
+      await editState(state => ({
+        changes: { settings: { ...state.settings, readingLanguage: cmd.payload }, revision: state.revision + 1 },
+        result: undefined,
+      }));
+      refreshPages();
+      return readingLanguage(cmd.payload, chrome.i18n.getUILanguage());
     case 'saveSettings':
     case 'saveModelSettings':
     case 'saveReadingSettings': {
@@ -454,6 +461,8 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
         origin, youtube: isYouTube(page.hostname) && page.protocol === 'https:',
         translateEmoji: state.settings.translateEmoji, skipReadingLanguage: state.settings.skipReadingLanguage,
         readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()),
+        targetLanguage: state.settings.readingLanguage,
+        browserLanguage: readingLanguage('', chrome.i18n.getUILanguage()),
         preferredScope: state.preferredScopes[origin] ?? state.settings.preferredScope,
         scopes: await scopeOptions(page, state.enabledSites, state.scopeOverrides),
       } satisfies SiteState;

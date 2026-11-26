@@ -339,7 +339,10 @@ test('Twitch finds nested chat, keeps the chosen scope, and leaves no picker on 
   await popup.locator('#scope').selectOption('room');
   await popup.getByRole('button', { name: '自动识别弹幕区' }).click();
   await live.getByText('正在识别弹幕区', { exact: true }).waitFor();
+  await live.locator('[data-lcc-kind="panel"] .panel.busy').waitFor();
+  await live.getByText('正在等待新弹幕，确认哪个区域持续更新…', { exact: true }).waitFor();
   await live.getByText('未找到弹幕区', { exact: true }).waitFor();
+  assert.equal(await live.getByRole('button', { name: '点一条弹幕正文' }).count(), 0);
   await openPopup();
   assert.equal(await popup.locator('#scope').inputValue(), 'room');
   assert.equal(await popup.locator('#enabled').isChecked(), false);
@@ -364,6 +367,8 @@ test('Twitch finds nested chat, keeps the chosen scope, and leaves no picker on 
   const panel = live.getByRole('region', { name: 'LiveChat Copilot' });
   await panel.getByText('已识别弹幕区', { exact: true }).waitFor();
   assert.equal(await panel.getByRole('list').count(), 0);
+  assert.equal(await panel.getByRole('button', { name: '点一条弹幕正文' }).count(), 0);
+  assert.equal(await panel.getByRole('button', { name: '手动选整个弹幕区' }).count(), 0);
   const outline = live.locator('[data-lcc-kind="panel"] .hover.detected');
   const chatList = live.locator('.chat-scrollable-area__message-container');
   await outline.waitFor();
@@ -395,6 +400,7 @@ test('Twitch finds nested chat, keeps the chosen scope, and leaves no picker on 
   await panel.getByRole('button', { name: '确认调整' }).waitFor();
   await live.keyboard.press('ArrowUp');
   assert.deepEqual(await outline.boundingBox(), await live.locator('aside').boundingBox());
+  await panel.getByText(/^已扩大一层/).waitFor();
   await live.keyboard.press('ArrowDown');
   assert.deepEqual(await outline.boundingBox(), await chatList.boundingBox());
   await live.keyboard.press('ArrowDown');
@@ -404,14 +410,16 @@ test('Twitch finds nested chat, keeps the chosen scope, and leaves no picker on 
   await live.keyboard.press('ArrowUp');
   await live.keyboard.press('Enter');
   await panel.getByText('核对弹幕样本', { exact: true }).waitFor();
+  assert.equal(await outline.evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(34, 197, 94, 0.16)');
+  assert.equal(await panel.getByRole('button', { name: '点一条弹幕正文' }).count(), 0);
   await panel.getByRole('button', { name: '关闭', exact: true }).click();
   await action(options, tab, 'detect');
   await outline.waitFor();
   await live.keyboard.press('Escape');
   await panel.waitFor({ state: 'hidden' });
   await outline.waitFor({ state: 'hidden' });
-  await action(options, tab, 'detect');
-  await panel.getByRole('button', { name: '点一条弹幕正文' }).click();
+  await action(options, tab, 'pick');
+  await panel.getByRole('button', { name: '改为点一条弹幕正文' }).click();
   await live.getByText('Fantastic', { exact: true }).click();
   await panel.getByText('核对弹幕样本', { exact: true }).waitFor();
   await panel.getByText('What a game!', { exact: true }).waitFor();
@@ -657,6 +665,21 @@ test('the popup offers only room and site scopes and skips matching languages', 
   }, [english, japanese]);
   await chat.getByText('译：' + japanese, { exact: true }).waitFor();
   assert.equal(requestLog.some(request => JSON.stringify(request.messages[1].content).includes(english)), false);
+
+  const target = popup.locator('#target-language');
+  assert.equal(await target.inputValue(), 'en');
+  await target.selectOption('ja');
+  await popup.getByText('自动翻译时跳过已是日语的弹幕', { exact: true }).waitFor();
+  await chat.getByText('译：' + english, { exact: true }).waitFor();
+  await chat.getByText('译：' + japanese, { exact: true }).waitFor({ state: 'detached' });
+  assert.ok(requestLog.some(({ messages }) => typeof messages[1].content === 'string' &&
+    JSON.parse(messages[1].content).targetLanguage === 'ja' && messages[1].content.includes(english)));
+  await popup.locator('#skip-reading').uncheck();
+  await chat.getByText('译：' + japanese, { exact: true }).waitFor();
+  await target.selectOption('');
+  await until(async () => (await command(options, 'getSettings')).settings.readingLanguage === '');
+  await target.selectOption('en');
+  await popup.locator('#skip-reading').check();
 
   await popup.locator('#scope').selectOption('site');
   await popup.locator('#enabled').check();

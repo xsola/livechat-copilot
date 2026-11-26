@@ -287,6 +287,11 @@ export function startLiveChat(signal: AbortSignal) {
       active.beginSearch();
       trackActivity();
       void (async () => {
+        await new Promise<void>(resolve => {
+          const timer = setTimeout(resolve, 80);
+          requestAnimationFrame(() => { clearTimeout(timer); setTimeout(resolve, 0); });
+        });
+        if (currentSearch !== searchNumber || !active.isSearching()) return;
         await refresh(true);
         if (currentSearch !== searchNumber || !active.isSearching()) return;
         const matched = () => {
@@ -298,8 +303,10 @@ export function startLiveChat(signal: AbortSignal) {
           return true;
         };
         if (matched()) return;
+        active.searchProgress('正在检查页面结构和重复出现的消息…');
         let candidates = findCandidates(document, page, frame, activity);
         if (!candidates[0] || candidates[0].score < 9) {
+          active.searchProgress('正在等待新弹幕，确认哪个区域持续更新…');
           await new Promise(resolve => setTimeout(resolve, candidates.length ? 1100 : 1800));
           if (currentSearch !== searchNumber || !active.isSearching()) return;
           nextScan = 0;

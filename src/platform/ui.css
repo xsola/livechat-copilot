@@ -54,6 +54,9 @@ button:disabled { cursor: default; opacity: .6; }
 .region-review { margin-top: 14px; padding-top: 8px; border-top: 1px solid light-dark(#d3ddeb, #445269); }
 #advanced-prompt summary { cursor: pointer; font-weight: 600; }
 #status, #usage-status, #test-detail { overflow-wrap: anywhere; }
+.popup #status.busy::before { content: ''; display: inline-block; width: .75em; height: .75em; margin-right: .55em; border: 2px solid light-dark(#cedcf0,#627390); border-top-color: currentColor; border-radius: 50%; animation: lcc-spin .8s linear infinite; }
+@keyframes lcc-spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .popup #status.busy::before { animation: none; } }
 #status:empty, #image-status:empty, #preferences-status:empty { display: none; }
 @media (max-width: 640px) {
   .options { padding: 16px; }

@@ -8,11 +8,15 @@ const siteLabel = document.querySelector<HTMLParagraphElement>('#site')!;
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const emoji = document.querySelector<HTMLInputElement>('#translate-emoji')!;
 const skipReading = document.querySelector<HTMLInputElement>('#skip-reading')!;
+const targetLanguage = document.querySelector<HTMLSelectElement>('#target-language')!;
+const skipLabel = document.getElementById('skip-label')!;
 const scope = document.querySelector<HTMLSelectElement>('#scope')!;
 const resetScope = document.querySelector<HTMLButtonElement>('#reset-scope')!;
 const scopeHelp = document.getElementById('scope-help')!;
 const status = document.querySelector<HTMLParagraphElement>('#status')!;
 const actions = ['detect', 'pick'] as const;
+const actionButtons = actions.map(id => document.querySelector<HTMLButtonElement>('#' + id)!);
+const translationLanguages = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko', 'es', 'fr', 'de', 'pt', 'ru', 'it', 'vi', 'th', 'id', 'ar'];
 let tabId: number;
 let site: SiteState;
 const scopeNames: Record<TranslationScope, string> = { room: '当前直播间', site: '本站所有直播间' };
@@ -55,15 +59,28 @@ async function prepareSite() {
 }
 
 async function command(pageAction: typeof actions[number]) {
-  status.textContent = pageAction === 'detect' ? '正在打开弹幕识别…' : '正在打开手动选区…';
-  await prepareSite();
-  let received = await send('pageCommand', { tabId, action: pageAction });
-  if (!received) {
-    await send('attach', tabId);
-    received = await send('pageCommand', { tabId, action: pageAction });
+  for (const button of actionButtons) button.disabled = true;
+  status.classList.add('busy');
+  status.textContent = '正在连接当前直播页面…';
+  try {
+    await prepareSite();
+    status.textContent = pageAction === 'detect' ? '正在启动弹幕识别…' : '正在打开手动选区…';
+    let received = await send('pageCommand', { tabId, action: pageAction });
+    if (!received) {
+      await send('attach', tabId);
+      received = await send('pageCommand', { tabId, action: pageAction });
+    }
+    if (!received) throw new Error('没有找到活动的聊天页面，请打开或展开直播聊天。');
+    window.close();
+  } finally {
+    status.classList.remove('busy');
+    for (const button of actionButtons) button.disabled = false;
   }
-  if (!received) throw new Error('没有找到活动的聊天页面，请打开或展开直播聊天。');
-  window.close();
+}
+
+function showTargetLanguage() {
+  skipLabel.textContent = '自动翻译时跳过已是' + languageName(site.readingLanguage) + '的弹幕';
+  targetLanguage.value = site.targetLanguage;
 }
 
 void run(async () => {
@@ -81,7 +98,12 @@ void run(async () => {
   emoji.disabled = false;
   skipReading.checked = site.skipReadingLanguage;
   skipReading.disabled = false;
-  document.getElementById('skip-label')!.textContent = '自动翻译时跳过' + languageName(site.readingLanguage) + '弹幕';
+  targetLanguage.add(new Option('跟随浏览器（' + languageName(site.browserLanguage) + '）', ''));
+  for (const code of new Set([...translationLanguages, site.targetLanguage].filter(Boolean))) {
+    targetLanguage.add(new Option(languageName(code), code));
+  }
+  targetLanguage.disabled = false;
+  showTargetLanguage();
   for (const action of actions) {
     const button = document.querySelector<HTMLButtonElement>('#' + action)!;
     button.disabled = false;
@@ -112,6 +134,15 @@ function setScope(checked: boolean | null) {
 
 enabled.addEventListener('change', () => setScope(enabled.checked));
 resetScope.addEventListener('click', () => setScope(null));
+
+targetLanguage.addEventListener('change', () => {
+  const preference = targetLanguage.value;
+  targetLanguage.disabled = true;
+  void run(async () => {
+    site.readingLanguage = await send('setTargetLanguage', preference);
+    site.targetLanguage = preference;
+  }).finally(() => { showTargetLanguage(); targetLanguage.disabled = false; });
+});
 
 skipReading.addEventListener('change', () => {
   const checked = skipReading.checked;

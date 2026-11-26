@@ -171,10 +171,7 @@ export function findCandidates(document: Document, page: URL, frame: URL, activi
         element.clientHeight <= 0 || element.clientWidth <= 0) continue;
     const found = candidateFrom(document, element, page, frame);
     if (!found || found.messages.length < 2) continue;
-    const [first, second] = rankComposers(document, element, found.rule);
-    const alternativeComposer = first && second && first.score - second.score <= 2 ? second.rule : undefined;
-    const score = found.score + Math.min(5, activity.get(element) ?? 0) + (first ? Math.min(4, first.score) : 0);
-    if (score >= 4) ranked.push({ ...found, rule: first?.rule ?? found.rule, alternativeComposer, score });
+    ranked.push({ ...found, score: found.score + Math.min(5, activity.get(element) ?? 0) });
   }
   const unique = new Set<Element>();
   return ranked.sort((a, b) => b.score - a.score).filter(candidate => {
@@ -182,7 +179,12 @@ export function findCandidates(document: Document, page: URL, frame: URL, activi
     if (unique.has(first)) return false;
     unique.add(first);
     return true;
-  });
+  }).slice(0, 24).map(candidate => {
+    const [first, second] = rankComposers(document, candidate.container, candidate.rule);
+    const alternativeComposer = first && second && first.score - second.score <= 2 ? second.rule : undefined;
+    const score = candidate.score + (first ? Math.min(4, first.score) : 0);
+    return { ...candidate, rule: first?.rule ?? candidate.rule, alternativeComposer, score };
+  }).filter(candidate => candidate.score >= 4).sort((a, b) => b.score - a.score);
 }
 
 export function visionSample(candidate: Candidate) {
