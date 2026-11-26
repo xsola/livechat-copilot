@@ -9,6 +9,7 @@ export interface Candidate extends RuleTest {
   score: number;
   alternativeComposer?: ChatRule;
   alternativeBody?: Pick<Candidate, 'rule' | 'messages'>;
+  userMarking?: { bodyTag: string; authorTag?: string };
 }
 
 const chatNames = /chat|comment|message|danmaku/i;
@@ -100,6 +101,8 @@ export function candidateFrom(
   const [shape, group] = top;
   const rows = useSemantic ? children : group;
   if (rows.length < 2) return;
+  if (!useSemantic && !region.matches('ul, ol, [role="log"], [role="list"]') &&
+    rows.every(row => /^(inline|contents)/.test(getComputedStyle(row).display))) return;
   const { body, bodyAfter, alternativeBodies } = inferBody(rows, sampleRow, example);
   const hasMetadata = rows.some(row => query(row, messageMetadata));
   if (!body && !bodyAfter && (hasMetadata || sampleRow && example !== sampleRow)) {
@@ -254,6 +257,11 @@ export function visionSample(candidate: Candidate) {
   const document = candidate.container.ownerDocument;
   const fragment = document.createElement('div');
   fragment.setAttribute('data-container-tag', candidate.container.localName);
+  if (candidate.userMarking) {
+    fragment.setAttribute('data-user-marked-body-tag', candidate.userMarking.bodyTag);
+    if (candidate.userMarking.authorTag) fragment.setAttribute('data-user-marked-author-tag', candidate.userMarking.authorTag);
+    fragment.setAttribute('data-extraction', candidate.rule.bodyAfter ? 'after-author' : 'body-element');
+  }
   const messages = candidate.messages.slice(-6);
   for (const { node, body, text } of messages) {
     const sample = document.createElement('div');

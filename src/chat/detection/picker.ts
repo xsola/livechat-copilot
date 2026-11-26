@@ -5,6 +5,7 @@ import { PagePanel, type ReviewFeedback } from '../page-panel';
 import type { PageSettings } from '../../platform/config';
 import { testRule } from '../dom';
 import type { BodyVerdict } from '../../models/tasks';
+import { correctionCandidates, correctionRows } from './correction';
 
 function bodyFeedback(verdict?: BodyVerdict) {
   if (verdict === 'clean') return '正文样本未见昵称、徽章或时间戳混入。';
@@ -89,10 +90,11 @@ export class Picker {
       this.panel.show('未找到弹幕区', reason + '可从工具栏打开「手动选择弹幕区」。');
     }
     if (review) this.panel.showReview(review);
+    this.panel.button('纠正规则', () => this.startCorrection());
     this.panel.button('关闭', () => this.close());
   }
 
-  async locate(candidates: Candidate[], unresolved?: Element) {
+  async locate(candidates: Candidate[], unresolved?: Element, correctionFallback?: () => void) {
     const attempt = this.searchEpoch;
     const settings = this.settings();
     if (!candidates.length) {
@@ -119,6 +121,7 @@ export class Picker {
       } catch { return []; }
     });
     if (!visible.length) {
+      if (correctionFallback) { correctionFallback(); return; }
       this.noCandidate(undefined, unresolved, { state: 'skipped', lines: [candidates.length
         ? '候选区域当前不可截图，可滚动到可见范围后重试。' : '没有找到可供截图核验的候选。'] });
       return;
@@ -139,6 +142,7 @@ export class Picker {
         if (areas.length === 3) break;
       }
       if (!areas.length) {
+        if (correctionFallback) { correctionFallback(); return; }
         this.noCandidate(undefined, unresolved, { state: 'skipped', lines: ['候选区域已变化，未进行截图核验。'] });
         return;
       }
@@ -154,13 +158,15 @@ export class Picker {
           lines: ['已用截图比对候选位置。', bodyFeedback(result.bodyVerdict)], reason: result.reason,
         } });
       }
+      else if (correctionFallback) correctionFallback();
       else this.noCandidate(undefined, unresolved, {
         state: 'warning', lines: ['模型或本地校验未能确认可用的弹幕候选。'], reason: result.reason,
       });
     } catch (error) {
-      if (this.searchEpoch === attempt) this.noCandidate(undefined, unresolved, {
-        state: 'skipped', lines: [error instanceof Error ? error.message : '截图核验失败。'],
-      });
+      if (this.searchEpoch === attempt && this.searching) {
+        if (correctionFallback) correctionFallback();
+        else this.noCandidate(undefined, unresolved, { state: 'skipped', lines: [error instanceof Error ? error.message : '截图核验失败。'] });
+      }
     } finally {
       this.panel.captureVisibility(true);
     }
@@ -190,6 +196,7 @@ export class Picker {
         body ? '绿框标出指针下的区域。点击一条弹幕的文字，插件会据此查找弹幕列表。'
           : '移动指针预览绿框，点击包含多条弹幕的列表。↑ 扩大选区，↓ 缩小选区，Esc 退出。');
       if (!body) this.panel.button('改为点一条弹幕正文', () => this.start(true));
+      this.panel.button('纠正规则', () => this.startCorrection());
     }
     this.panel.button('取消', () => this.close());
     const handleKey = (event: KeyboardEvent) => {
@@ -245,7 +252,7 @@ export class Picker {
     const direct = body ? undefined : candidateFrom(document, node, this.page, this.frame);
     const example = !direct && !adjusted ? candidateFromExample(document, node, this.page, this.frame) : undefined;
     const candidate = direct ?? example;
-    if (candidate) { this.preview(candidate, undefined, adjusted, example ? node : undefined); return; }
+    if (candidate) { this.preview(candidate, undefined, { adjusted, example: example ? node : undefined }); return; }
     if (adjusted) {
       this.panel.note('当前框内没有提取到多条弹幕。请按 ↑ 或 ↓ 继续调整。');
       return;
@@ -255,12 +262,87 @@ export class Picker {
     this.panel.showAnchored('暂时无法用这个选区提取弹幕', '绿框标出刚才选择的范围。请点一条聊天消息的正文，或选中包含多条消息的列表。');
     this.panel.button('点一条弹幕正文', () => this.start(true));
     this.panel.button('手动选整个弹幕区', () => this.start());
+    this.panel.button('纠正规则', () => this.startCorrection());
     this.panel.button('关闭', () => this.close());
     this.dismissOnEscape();
   }
 
+  private startCorrection() {
+    this.correctionStep('1/4 · 选第一条完整消息', '把绿框扩到一条弹幕整行，框住昵称和正文。↑ 向外扩展，↓ 返回指针位置，点击或按 Enter 确认。', first => {
+      this.correctionStep('2/4 · 选另一条消息', '蓝框是第一条。点击同一列表内另一条弹幕的任意位置。', target => {
+        const rows = correctionRows(first, target);
+        if (!rows) { this.panel.note('请选择同一列表内的另一条消息。选错第一条时可以重新标注。'); return; }
+        this.correctionStep('3/4 · 标记正文', '点击蓝框内第一条消息的正文。如果正文和昵称共用一块文字，可以选整行，再标记独立的昵称节点。', body => {
+          if (!first.contains(body)) { this.panel.note('请在蓝框标出的第一条消息内标记正文。'); return; }
+          const confirm = (author?: Element) => {
+            if (author && (author === first || !first.contains(author) || author.contains(body) || (body !== first && body.contains(author)))) {
+              this.panel.note('请在第一条消息中选与正文分开的昵称节点。');
+              return;
+            }
+            const [best, alternative] = correctionCandidates(rows, body, author, this.page, this.frame);
+            if (!best) { this.panel.note('这份标注未能从两条消息中稳定提取正文。可重新标注，或尝试标出昵称。'); return; }
+            const settings = this.settings();
+            const modelCandidate = settings?.autoVision && settings.imageInput && settings.modelConfigured ? alternative : undefined;
+            const local = () => this.preview(best, undefined, { example: body === first ? undefined : body, deferReview: Boolean(modelCandidate) });
+            local();
+            if (modelCandidate) {
+              this.panel.button('让模型比较候选规则', () => {
+                this.beginSearch();
+                void this.locate([best, modelCandidate], rows.list, () => {
+                  local();
+                  this.panel.note('模型未能选定规则，请核对本地提取结果。');
+                });
+              });
+            }
+          };
+          this.correctionStep('4/4 · 标记昵称', '点击第一条消息的昵称。正文有独立节点时可以跳过这一步。', confirm, first,
+            body === first ? undefined : () => confirm());
+        }, first);
+      }, first);
+    });
+  }
+
+  private correctionStep(title: string, description: string, confirm: (node: Element) => void, sample?: Element, skip?: () => void) {
+    this.endListeners();
+    this.showing = undefined;
+    this.searching = false;
+    const { signal } = this.controller = new AbortController();
+    const options = { capture: true, signal };
+    let target: Element | undefined;
+    let cursor: Element | undefined;
+    this.panel.highlight();
+    this.panel.showPicker(title, description);
+    this.panel.highlightSample(sample);
+    if (skip) this.panel.button('跳过昵称并试读', skip);
+    if (sample) this.panel.button('重新标注', () => this.startCorrection());
+    this.panel.button('取消', () => this.close());
+    document.addEventListener('pointermove', event => {
+      if (this.panel.contains(event) || !(event.target instanceof Element) || cursor === event.target) return;
+      cursor = target = event.target;
+      this.panel.highlight(target, true);
+    }, options);
+    document.addEventListener('click', event => {
+      if (this.panel.contains(event) || !(event.target instanceof Element)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      confirm(cursor === event.target && target ? target : event.target);
+    }, options);
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); this.close(); return; }
+      if (this.panel.contains(event) || !target || !['Enter', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Enter') { confirm(target); return; }
+      if (event.key === 'ArrowUp' && target.parentElement && target.parentElement !== document.body) target = target.parentElement;
+      if (event.key === 'ArrowDown' && cursor && target.contains(cursor)) target = cursor;
+      this.panel.highlight(target, true);
+    };
+    document.addEventListener('keydown', keydown, options);
+    if (window.top !== window) window.top?.document.addEventListener('keydown', keydown, options);
+  }
+
   private preview(candidate: Candidate, automatic?: { source?: string; located?: ReviewFeedback; excludeComposer?: boolean; localOnly?: boolean },
-    adjusted = false, example?: Element) {
+    { adjusted = false, example, deferReview = false }: { adjusted?: boolean; example?: Element; deferReview?: boolean } = {}) {
     this.endListeners();
     this.searching = false;
     candidate = {
@@ -277,7 +359,7 @@ export class Picker {
         : '当前页面未识别到输入区。';
     const sources: Record<string, string> = { builtin: '内置规则', local: '你保存的规则', community: '社区规则', 'same-site': '同站直播间已保存的规则' };
     const { source, located } = automatic ?? {};
-    if (automatic) {
+    if (automatic && !candidate.userMarking) {
       this.panel.showAnchored('已识别弹幕区', source
         ? '绿框标出弹幕区。当前使用' + (sources[source] ?? source) + '。' + controls
         : '请核对绿框位置。框住弹幕区就可以保存。' + controls);
@@ -293,6 +375,7 @@ export class Picker {
       this.panel.button('调整框选范围', () => this.start(false, candidate));
     }
     this.dismissOnEscape();
+    this.panel.button('纠正规则', () => this.startCorrection());
     const saveButton = source ? undefined : this.panel.button('保存并启用规则', button => {
         button.disabled = true;
         void this.save(candidate).then(() => this.close(), error => {
@@ -310,6 +393,10 @@ export class Picker {
       return;
     }
     if (located) { this.panel.showReview(located); return; }
+    if (deferReview) {
+      this.panel.showReview({ state: 'skipped', lines: ['可直接核对本地样本，也可请模型比较两个候选。'] });
+      return;
+    }
     if (automatic?.localOnly) {
       this.panel.showReview({ state: 'skipped', lines: ['当前候选来自本地识别。可从工具栏重新发起自动识别。'] });
       return;

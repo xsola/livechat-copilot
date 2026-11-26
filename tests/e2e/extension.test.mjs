@@ -567,6 +567,60 @@ test('Douyu identifies sparse chat and shows the selected sample independently o
   assert.deepEqual(await live.locator('[data-lcc-kind="panel"] .hover.detected').boundingBox(), await chatList.boundingBox());
 });
 
+test('generic rule correction validates independent rows and leaves their authors out of live translations', { timeout: 40_000 }, async t => {
+  const { context, options, requestLog } = await boot(t);
+  await options.getByRole('button', { name: '测试当前模型' }).click();
+  await options.getByText('支持', { exact: true }).waitFor();
+  await options.locator('#auto-vision').check();
+  await options.getByRole('button', { name: '保存并授权' }).click();
+  await options.getByText('已保存。', { exact: true }).waitFor();
+  const url = 'https://www.huya.com/fixture-room';
+  const row = (name, content, badge = '', tail = '') => `<li class="J_msg"><p>${badge}<span class="name J_userMenu">${name}</span><span class="colon">:</span><span class="msg">${content}</span>${tail}</p></li>`;
+  await context.route(url, route => route.fulfill({ contentType: 'text/html', body: `<div style="margin:180px 0 0 58%">
+    <ul id="chat-room__list">${row('SampleAuthor', 'First body')}${row('OtherAuthor', 'Second body', '<i>Badge label</i>', ' <small>Extra label</small>')}</ul></div>` }));
+  const live = await context.newPage();
+  await live.goto(url);
+  await live.bringToFront();
+  const tab = await tabId(options, url);
+  await command(options, 'attach', tab);
+  await action(options, tab, 'pick');
+  const panel = live.getByRole('region', { name: 'LiveChat Copilot' });
+  await panel.getByRole('button', { name: '改为点一条弹幕正文' }).click();
+  const list = live.locator('#chat-room__list');
+  await list.locator('.msg').first().click();
+  await panel.getByText('核对弹幕样本', { exact: true }).waitFor();
+  assert.deepEqual(await panel.getByRole('listitem').allTextContents(), ['First body', 'Second body']);
+  await panel.getByRole('button', { name: '纠正规则' }).click();
+  await list.locator('.msg').first().hover();
+  await live.keyboard.press('ArrowUp');
+  await live.keyboard.press('ArrowUp');
+  await live.keyboard.press('Enter');
+  await panel.getByText(/选另一条消息/).waitFor();
+  await list.locator('.msg').first().click();
+  await panel.getByText(/请选择同一列表内的另一条消息/).waitFor();
+  await list.locator('.msg').nth(1).click();
+  await panel.getByText(/标记正文/).waitFor();
+  await list.locator('.msg').first().click();
+  await panel.getByText(/^4\/4 · 标记昵称$/).waitFor();
+  await list.locator('.name').first().click();
+  await panel.getByText('核对弹幕样本', { exact: true }).waitFor();
+  assert.deepEqual(await panel.getByRole('listitem').allTextContents(), ['First body', 'Second body']);
+  await panel.getByRole('button', { name: '让模型比较候选规则' }).click();
+  await panel.getByText('已用截图比对候选位置。', { exact: true }).waitFor();
+  assert.deepEqual(await panel.getByRole('listitem').allTextContents(), ['First body', 'Second body']);
+  const choice = requestLog.find(({ messages }) => Array.isArray(messages[1].content) && JSON.parse(messages[1].content[0].text).candidates);
+  const candidates = JSON.parse(choice.messages[1].content[0].text).candidates;
+  assert.equal(candidates.length, 2);
+  assert.ok(candidates.every(candidate => candidate.html.includes('data-user-marked-author-tag')));
+  await panel.getByRole('button', { name: '保存并启用规则' }).click();
+  await panel.waitFor({ state: 'hidden' });
+  await command(options, 'setSite', { tabId: tab, enabled: true, origin: new URL(url).origin });
+  await live.getByText('译：First body', { exact: true }).waitFor();
+  await list.evaluate((area, html) => area.insertAdjacentHTML('beforeend', html), row('ThirdAuthor', 'Third body'));
+  await live.getByText('译：Third body', { exact: true }).waitFor();
+  assert.ok(requestLog.every(request => !/SampleAuthor|OtherAuthor|ThirdAuthor|Badge label/.test(JSON.stringify(request))));
+});
+
 test('generic rules isolate nested lists and extract marked or inline bodies without metadata', { timeout: 45_000 }, async t => {
   const { context, options, local, requestLog } = await boot(t);
   const metadata = '<span data-role="badge">Private badge</span><span class="chat-badge">Badge level</span><span class="username">Sender Alias</span>';
