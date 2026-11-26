@@ -11,7 +11,7 @@ export class Picker {
   private showing?: Candidate;
   private searching = false;
   private searchEpoch = 0;
-  private readonly reviews = new Map<string, { text: string }>();
+  private readonly reviews = new Map<string, { text: string; reason?: string }>();
 
   constructor(
     private readonly panel: PagePanel,
@@ -23,7 +23,7 @@ export class Picker {
 
   suggest(candidate: Candidate) {
     if (!this.searching) return false;
-    this.preview(candidate);
+    this.preview(candidate, {});
     return true;
   }
 
@@ -75,7 +75,7 @@ export class Picker {
       const result = await send('locateChat', areas);
       if (!this.searching || this.searchEpoch !== attempt) return;
       const selected = result.candidateId ? candidatesById.get(result.candidateId) : undefined;
-      if (selected) this.preview(selected, undefined, '模型选出的候选区。' + result.reason);
+      if (selected) this.preview(selected, { located: true });
       else this.noCandidate();
     } catch (error) {
       if (this.searchEpoch === attempt) this.noCandidate(error instanceof Error ? error.message + ' ' : undefined);
@@ -85,7 +85,7 @@ export class Picker {
   }
 
   showMatched(candidate: Candidate, source: string) {
-    this.preview(candidate, source);
+    this.preview(candidate, { source });
   }
 
   start(body = false) {
@@ -97,7 +97,8 @@ export class Picker {
     this.showing = undefined;
     this.selected = undefined;
     this.cursor = undefined;
-    this.panel.showPicker(body ? '点一条弹幕正文' : '手动选择弹幕区',
+    this.panel.highlight();
+    this.panel.showAside(body ? '点一条弹幕正文' : '手动选择弹幕区',
       body ? '在聊天里点击一条消息的文字，插件会从这条消息向外查找弹幕列表。'
         : '点击包含多条弹幕的列表。↑ 扩大选区，↓ 缩小选区，Esc 退出。');
     if (!body) this.panel.button('改为点一条弹幕正文', () => this.start(true));
@@ -151,7 +152,7 @@ export class Picker {
     this.panel.button('关闭', () => this.close());
   }
 
-  private preview(candidate: Candidate, source?: string, locatedNote?: string) {
+  private preview(candidate: Candidate, automatic?: { source?: string; located?: boolean }) {
     this.endListeners();
     this.searching = false;
     candidate = {
@@ -159,7 +160,7 @@ export class Picker {
       rule: completeCandidateRule(document, candidate.container, candidate.rule),
     };
     this.showing = candidate;
-    this.panel.highlight(candidate.container);
+    this.panel.highlight(candidate.container, Boolean(automatic));
     const { state, button } = composerElements(candidate);
     const controls = state === 'editable'
       ? (button ? '已找到输入区和发送按钮。' : '已找到可编辑输入区，发送按钮暂未识别。')
@@ -167,8 +168,14 @@ export class Picker {
         ? '已找到输入区，当前无法编辑。'
         : '当前页面未识别到输入区。';
     const sources: Record<string, string> = { builtin: '内置规则', local: '你保存的规则', community: '社区规则' };
-    this.panel.show(source ? '已识别弹幕' : '核对弹幕样本',
-      (source ? '当前使用' + (sources[source] ?? source) + '。' : '下面是从候选区读到的消息。样本正确就可保存。') + controls, candidate);
+    const { source, located } = automatic ?? {};
+    if (automatic) {
+      this.panel.showAside('已识别弹幕区', source
+        ? '绿框标出弹幕区。当前使用' + (sources[source] ?? source) + '。' + controls
+        : '请核对绿框位置。框住弹幕区就可以保存。' + controls);
+    } else {
+      this.panel.show('核对弹幕样本', '下面是从候选区读到的消息。样本正确就可保存。' + controls, candidate);
+    }
     if (!source) {
       this.panel.button('保存并启用规则', button => {
         button.disabled = true;
@@ -185,11 +192,11 @@ export class Picker {
       this.panel.note('暂无正文样本，先使用本地规则。');
       return;
     }
-    if (locatedNote) { this.panel.note(locatedNote); return; }
-    void this.queueReview(candidate);
+    if (located) { this.panel.note('已用截图比对候选位置。'); return; }
+    void this.queueReview(candidate, !automatic);
   }
 
-  private queueReview(candidate: Candidate) {
+  private queueReview(candidate: Candidate, showReason: boolean) {
     const settings = this.settings();
     if (!settings?.imageInput) {
       this.panel.note(settings?.imageInput === false
@@ -204,7 +211,10 @@ export class Picker {
     const { state, button } = composerElements(candidate);
     const key = JSON.stringify([settings.revision, candidate.rule, state, Boolean(button)]);
     const existing = this.reviews.get(key);
-    if (existing) { this.panel.note(existing.text); return Promise.resolve(existing); }
+    const display = ({ text, reason }: { text: string; reason?: string }) => {
+      this.panel.note(showReason && reason ? text + '。' + reason : text);
+    };
+    if (existing) { display(existing); return; }
     this.panel.note('正在自动复核候选规则…');
     return (async () => {
       await new Promise(resolve => setTimeout(resolve, 250));
@@ -215,7 +225,7 @@ export class Picker {
           this.reviews.set(key, result);
           if (this.reviews.size > 30) this.reviews.delete(this.reviews.keys().next().value!);
         }
-        if (this.showing === candidate) this.panel.note(result.text);
+        if (this.showing === candidate) display(result);
       }
       return result;
     })();
@@ -255,7 +265,7 @@ export class Picker {
         uncertain: '无法确定发送区',
       }[result.composerVerdict];
       const rejected = result.verdict === 'unlikely-chat';
-      return { text: [prefix, composer, result.reason, rejected ? '建议点一条实际弹幕重新识别。' : ''].filter(Boolean).join('。') };
+      return { text: [prefix, composer, rejected ? '建议点一条实际弹幕重新识别' : ''].filter(Boolean).join('。'), reason: result.reason };
     } catch (error) {
       return { text: error instanceof Error ? error.message : '自动图像复核失败。' };
     } finally {

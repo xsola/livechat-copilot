@@ -160,7 +160,7 @@ test('YouTube restricted input is recognized without inferring a send-area misma
   const tab = await tabId(options, live.url());
   await action(options, tab, 'detect');
   await chat.getByText('已找到输入区，当前无法编辑。', { exact: false }).waitFor();
-  await chat.getByText('Synthetic region confirmed.', { exact: false }).waitFor();
+  await chat.getByText('可能是弹幕区', { exact: true }).waitFor();
   assert.equal(await chat.getByText('发送区可能不匹配', { exact: false }).count(), 0);
   const payloads = () => requestLog.flatMap(body => {
     const content = body.messages[1].content;
@@ -348,9 +348,11 @@ test('Twitch finds nested chat, keeps the chosen scope, and leaves no picker on 
   const tab = await tabId(options, live.url());
   await popup.getByRole('button', { name: '自动识别弹幕区' }).click();
   const panel = live.getByRole('region', { name: 'LiveChat Copilot' });
-  await panel.getByText('已识别弹幕', { exact: true }).waitFor();
-  await panel.getByText('Fantastic comeback!', { exact: true }).waitFor();
-  assert.equal(await panel.getByText('LIVE', { exact: true }).count(), 0);
+  await panel.getByText('已识别弹幕区', { exact: true }).waitFor();
+  assert.equal(await panel.getByRole('list').count(), 0);
+  const outline = live.locator('[data-lcc-kind="panel"] .hover.detected');
+  await outline.waitFor();
+  assert.deepEqual(await outline.boundingBox(), await live.locator('.chat-scrollable-area__message-container').boundingBox());
   await panel.getByRole('button', { name: '点一条弹幕正文' }).click();
   await live.getByText('Fantastic', { exact: true }).click();
   await panel.getByText('核对弹幕样本', { exact: true }).waitFor();
@@ -390,10 +392,13 @@ test('the vision model sees bounded candidate samples while automatic detection 
   await popup.getByRole('button', { name: '自动识别弹幕区' }).click();
   await live.getByText('正在识别弹幕区', { exact: true }).waitFor();
   await live.getByText('正在让模型对照候选区域截图和弹幕样本…', { exact: true }).waitFor();
-  await live.getByText('模型选出的候选区。Image matches the sample rows.', { exact: true }).waitFor();
+  await live.getByText('已用截图比对候选位置。', { exact: true }).waitFor();
+  await live.locator('[data-lcc-kind="panel"] .hover.detected').waitFor();
+  assert.equal(await live.getByRole('region', { name: 'LiveChat Copilot' }).getByRole('list').count(), 0);
   const request = requestLog.find(({ messages }) => Array.isArray(messages[1].content) && JSON.parse(messages[1].content[0].text).candidates);
   assert.ok(request);
   const [prompt, image] = request.messages[1].content;
+  assert.equal(request.messages[1].content.filter(part => part.type === 'image_url').length, 1);
   const { candidates } = JSON.parse(prompt.text);
   assert.equal(candidates.length, 2);
   assert.match(candidates[0].html, /That was close!/);
