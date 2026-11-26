@@ -190,7 +190,9 @@ function showPrompt() {
   editSystem.disabled = false;
   saveSystem.disabled = true;
   resetSystem.disabled = false;
-  resetSystem.textContent = promptContext.origin ? '恢复继承设置' : '恢复默认';
+  element('reset-system-help').textContent = promptContext.origin
+    ? '重置后，当前网站的这项任务会使用全局提示词。'
+    : '重置后，这项任务会使用插件内置的默认提示词。';
   element('prompt-context').textContent = [
     promptContext.origin ? '当前网站 ' + promptContext.origin : '全局默认',
     promptContext.title, promptContext.model, '阅读语言 ' + promptContext.readingLanguage,
@@ -218,7 +220,7 @@ function updatePrompt(value: string | null) {
     if (value === '') throw new Error('请填写指令，或使用恢复按钮。');
     promptContext = await send('savePrompt', { tabId: sourceTab, origin: promptContext.origin, task: currentTask(), value });
     showPrompt();
-    systemStatus.textContent = value === null ? '已恢复。' : '任务指令已保存。';
+    systemStatus.textContent = value === null ? '提示词已重置。' : '任务指令已保存。';
   });
 }
 saveSystem.addEventListener('click', () => updatePrompt(instruction.value.trim()));

@@ -68,8 +68,9 @@
         <div class="actions">
           <button type="button" id="edit-system" disabled>解锁编辑</button>
           <button type="button" id="save-system" disabled>保存任务指令</button>
-          <button type="button" id="reset-system" disabled>恢复默认</button>
+          <button type="button" id="reset-system" aria-describedby="reset-system-help" disabled>重置提示词</button>
         </div>
+        <p id="reset-system-help" class="secondary"></p>
         <p id="system-status" role="status"></p>
         <label>实际发送的系统提示词 <textarea id="system-preview" rows="7" readonly></textarea></label>
         <p class="secondary">预览包含已保存的任务指令、翻译风格和输出格式要求。直播弹幕与截图会按任务另行传入。</p>

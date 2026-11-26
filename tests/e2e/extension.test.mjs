@@ -323,8 +323,9 @@ test('advanced prompts show the real system message and apply a website override
   assert.ok(requestLog.some(body => body.messages[0].content === expected));
   const global = await command(options, 'promptContext');
   assert.doesNotMatch(global.prompts.translation.system, /custom website terminology/);
-  await options.getByRole('button', { name: '恢复继承设置' }).click();
-  await options.getByText('已恢复。').waitFor();
+  await options.getByText('重置后，当前网站的这项任务会使用全局提示词。').waitFor();
+  await options.getByRole('button', { name: '重置提示词' }).click();
+  await options.getByText('提示词已重置。').waitFor();
   assert.equal(await options.locator('#system-preview').inputValue(), global.prompts.translation.system);
 });
 
