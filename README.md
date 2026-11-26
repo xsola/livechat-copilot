@@ -11,14 +11,14 @@ npm ci
 npm run build
 ```
 
-打开 Chrome 的 `chrome://extensions`，开启开发者模式，点「加载已解压的扩展程序」，选择 `.output/chrome-mv3`。开发时可用 `npm run dev`。Windows PowerShell 如果拦截 `npm.ps1`，可用 `npm.cmd`。
+打开 Chrome 的 `chrome://extensions`，开启开发者模式，点「加载已解压的扩展程序」，选择 **`dist/chrome-mv3`**。该目录的第一层应能看到 `manifest.json`、`background.js` 和 `popup.html`。如果提示「清单文件缺失或不可读取」，确认选中的是这一层目录，然后重新加载。开发时可用 `npm run dev`。Windows PowerShell 如果拦截 `npm.ps1`，可用 `npm.cmd`。
 
 ## 在 YouTube 直播间试用
 
 1. 打开扩展设置。DeepSeek 预设地址为 `https://api.deepseek.com`，模型 ID 为 `deepseek-flash`。填入自己的 API Key，点「保存并授权」，然后点「测试已保存的模型」。也可配置兼容 Chat Completions 的服务。
 2. 打开一个有文字聊天的直播间并展开实时聊天。打开扩展工具栏菜单，勾选「在本站启用翻译」。默认把正文原地译为简体中文，阅读语言及逐条、微批、点击翻译模式均可在设置中修改。
 3. 如果想检查匹配或自定义区域，点「识别弹幕区」或「选择弹幕区域」。移动鼠标查看高亮，用 ↑ 和 ↓ 调整层级，点击或按 Enter 确认。预览有误时，可以再点选一条正文作为示例。确认保存后，刷新页面会复用规则。
-4. 配置了支持图像的模型时，可以在候选预览里点一次「AI 复核一次」，把候选区裁图和少量正文样本发送给该模型，获取建议。保存和启用由你确认。
+4. 如果希望使用 VLM，在设置中打开「自动复核新识别的候选规则」。插件识别到候选后会自动复核一次。模型会收到弹幕区裁图、少量正文和可见且没有草稿的发送区裁图。复核结果是建议，新规则仍由你确认。模型不支持图片时会提示并禁用复核，继续使用本地预览。Chrome 当前页尚无截图权限时，可以从直播标签页的工具栏启动识别。
 5. 从「房间语言」查看或修正回复语言记忆。阅读翻译使用设置里的阅读语言，房间语言供之后的双语回复使用。
 
 参考 [DeepSeek 模型文档](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)。

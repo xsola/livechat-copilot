@@ -64,7 +64,7 @@ export function testRule(root: ParentNode, rule: ChatRule, container?: Element |
 
 export function invalidateSelector(rule: ChatRule) {
   try {
-    for (const selector of [rule.container, rule.message, rule.body, rule.ignore]) {
+    for (const selector of [rule.container, rule.message, rule.body, rule.ignore, rule.composer, rule.sendButton]) {
       if (selector) document.createDocumentFragment().querySelector(selector);
     }
     return false;

@@ -14,6 +14,7 @@ const translationOutput = z.object({
 export const visionOutput = z.object({
   verdict: z.enum(['likely-chat', 'unlikely-chat', 'uncertain']),
   reason: z.string().trim().min(1).max(400),
+  composerVerdict: z.enum(['likely-composer', 'unlikely-composer', 'uncertain']).optional(),
 });
 export const roomOutput = z.object({
   language: languageCode.nullable(),
@@ -52,7 +53,7 @@ export function createTasks(meter: Meter, request = fetch) {
         return parsed;
       } catch (error) {
         if (error instanceof ModelError && error.usage) usage = error.usage;
-        if (!(error instanceof ModelError && error.retryEmpty && attempt === 0)) throw error;
+        if (!(error instanceof ModelError && error.retryEmpty && attempt === 0 && task !== 'vision')) throw error;
       } finally {
         await meter(task, success, Date.now() - start, usage).catch(() => undefined);
       }
@@ -70,8 +71,10 @@ export function createTasks(meter: Meter, request = fetch) {
     vision(settings: Settings, image: string, sample: object) {
       return call('vision', settings,
         'Judge whether the cropped region and HTML show a live-chat message list and whether the samples are bodies. ' +
-        'Return {"verdict":"likely-chat|unlikely-chat|uncertain","reason":"short explanation"}. ' +
-        'Use one exact verdict, and write the reason in the requested language.',
+        'The image shows chat first, followed by the editor and send control when indicated. ' +
+        'If an editor image is supplied, also judge whether the cropped controls belong to live chat. ' +
+        'Return {"verdict":"likely-chat|unlikely-chat|uncertain","reason":"short explanation","composerVerdict":"likely-composer|unlikely-composer|uncertain"}. ' +
+        'Omit composerVerdict if no editor image was supplied. Use exact verdicts and write the reason in the requested language.',
         { language: settings.readingLanguage, sample }, result => requireResult(visionOutput, result), 250, image);
     },
     roomProfile(settings: Settings, hints: object, lines: string[]) {

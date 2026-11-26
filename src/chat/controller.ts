@@ -5,7 +5,7 @@ import { roomLocation } from '../rooms/metadata';
 import type { ChatRule, RuleMatch } from '../rules/schema';
 import { PageMeter } from '../usage/page-meter';
 import { testRule, invalidateSelector, type RuleTest } from './dom';
-import { findCandidate, type Candidate } from './detection/candidates';
+import { findCandidate } from './detection/candidates';
 import { Picker } from './detection/picker';
 import { PagePanel } from './page-panel';
 import { ChatSession } from './session';
@@ -73,7 +73,7 @@ export function startLiveChat(signal: AbortSignal) {
     if (picker) return picker;
     panel = new PagePanel(document);
     picker = new Picker(panel, page, frame,
-      () => Boolean(snapshot?.settings.modelConfigured && snapshot.settings.imageInput),
+      () => snapshot?.settings,
       async candidate => {
         if (!candidate.container.isConnected || !testRule(document, candidate.rule)?.messages.length) {
           throw new Error('候选区域已变化，请重新选择。');
@@ -209,7 +209,8 @@ export function startLiveChat(signal: AbortSignal) {
     activityObserver?.disconnect();
     activityObserver = undefined;
     const { match, result } = selected;
-    const signature = JSON.stringify([match.rule, snapshot.settings]);
+    const { enabled, modelConfigured, mode, readingLanguage, revision } = snapshot.settings;
+    const signature = JSON.stringify([match.rule, enabled, modelConfigured, mode, readingLanguage, revision]);
     if (session?.container === result.container && sessionSignature === signature) return;
     session?.close();
     if (snapshot.settings.enabled) {
@@ -242,19 +243,15 @@ export function startLiveChat(signal: AbortSignal) {
       preparePicker().start();
       void refresh();
     }
-    if (action === 'detect') {
+    if (action === 'detect' || action === 'initial-review') {
       explicitDetection = true;
       if (picker) picker.resumeSuggestions();
       void refresh(true).then(() => {
         if (!explicitDetection) return;
-        if (session) {
+        if (session && (action === 'detect' || snapshot?.settings.autoVision)) {
           const current = session.match.rule;
           const existing = testRule(document, current);
-          preparePicker();
-          panel!.show('已识别弹幕', '当前使用 ' + session.match.source + ' 规则。你可以检查正文或重新选区。',
-            existing ? { ...existing, rule: current, score: 0 } satisfies Candidate : undefined);
-          panel!.button('重新选择', () => picker!.start());
-          panel!.button('关闭', () => picker!.close());
+          if (existing) preparePicker().showMatched({ ...existing, rule: current, score: 0 }, session.match.source);
         }
       });
     }

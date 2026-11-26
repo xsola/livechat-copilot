@@ -1,5 +1,5 @@
 import '../../platform/ui.css';
-import { defaultPrompt, hostPattern, parseEndpoint, parseRegistry, settingsSchema } from '../../platform/config';
+import { defaultPrompt, hostPattern, isTextOnlyModel, parseEndpoint, parseRegistry, settingsSchema } from '../../platform/config';
 import { send, type RuleSummary } from '../../platform/messages';
 import type { DailyUsage, ModelTask, PageCounter, TaskUsage } from '../../usage/usage';
 
@@ -9,6 +9,23 @@ const status = element('status');
 const usageStatus = element('usage-status');
 const diagnostic = document.querySelector<HTMLTextAreaElement>('#diagnostic')!;
 let keyOrigin = '';
+let refusedImageKey = '';
+
+function selectedImageKey() {
+  return JSON.stringify([field('endpoint').value.trim(), field('model').value.trim()]);
+}
+
+function updateVisionFields() {
+  const textOnly = isTextOnlyModel({ endpoint: field('endpoint').value.trim(), model: field('model').value.trim() });
+  const unavailable = refusedImageKey === selectedImageKey();
+  field('image').disabled = textOnly;
+  if (textOnly) field('image').checked = false;
+  field('auto-vision').disabled = textOnly || unavailable || !field('image').checked;
+  if (field('auto-vision').disabled) field('auto-vision').checked = false;
+  element('image-status').textContent = unavailable || textOnly
+    ? '当前模型接口不支持图片输入，已禁用自动图像复核。'
+    : field('image').checked ? '' : '图片输入未启用，已禁用自动图像复核。';
+}
 
 async function run(target: HTMLElement, operation: () => Promise<void>) {
   target.textContent = '';
@@ -78,17 +95,20 @@ async function showUsage() {
 }
 
 void run(status, async () => {
-  const { settings, rules } = await send('getSettings', undefined);
+  const { settings, rules, imageUnavailable } = await send('getSettings', undefined);
   field('endpoint').value = settings.model.endpoint;
   keyOrigin = parseEndpoint(settings.model.endpoint).origin;
   field('model').value = settings.model.model;
   field('key').value = settings.model.apiKey;
   field('image').checked = settings.model.imageInput;
+  field('auto-vision').checked = settings.autoVision;
   field('json').checked = settings.model.jsonMode;
   field('language').value = settings.readingLanguage;
   field('mode').value = settings.mode;
   field('prompt').value = settings.prompt;
   field('registry').value = settings.registryUrl;
+  if (imageUnavailable) refusedImageKey = selectedImageKey();
+  updateVisionFields();
   showRules(rules);
 });
 field('endpoint').addEventListener('change', () => {
@@ -99,6 +119,13 @@ field('endpoint').addEventListener('change', () => {
   } catch {
     // The form validates the completed endpoint before saving.
   }
+});
+for (const id of ['image', 'endpoint', 'model']) field(id).addEventListener('input', updateVisionFields);
+window.addEventListener('focus', () => {
+  void send('getSettings', undefined).then(({ settings, imageUnavailable }) => {
+    refusedImageKey = imageUnavailable ? JSON.stringify([settings.model.endpoint, settings.model.model]) : '';
+    updateVisionFields();
+  }).catch(() => undefined);
 });
 void run(usageStatus, showUsage);
 
@@ -112,11 +139,15 @@ element('settings').addEventListener('submit', event => {
       },
       readingLanguage: field('language').value.trim(), mode: field('mode').value,
       prompt: field('prompt').value, registryUrl: field('registry').value.trim(),
+      autoVision: field('auto-vision').checked && !field('auto-vision').disabled,
     });
     const origins = [hostPattern(parseEndpoint(settings.model.endpoint))];
     if (settings.registryUrl) origins.push(hostPattern(parseRegistry(settings.registryUrl)));
     if (!await chrome.permissions.request({ origins: [...new Set(origins)] })) throw new Error('未获得访问所需服务的权限。');
     await send('saveSettings', settings);
+    const { imageUnavailable } = await send('getSettings', undefined);
+    refusedImageKey = imageUnavailable ? selectedImageKey() : '';
+    updateVisionFields();
     status.textContent = '已保存。';
     if (settings.registryUrl) showRules(await send('syncRegistry', undefined));
   });

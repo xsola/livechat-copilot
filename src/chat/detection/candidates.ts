@@ -10,6 +10,8 @@ const messageBodies = [
 ];
 const author = '[rel="author"], [class*="author" i], [class*="username" i], [data-testid*="username" i], #author-name';
 const excluded = 'nav, header, footer, form, video, canvas, [data-livechat-copilot]';
+const editors = 'textarea, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], input[type="text"]';
+const sendLabel = /\b(?:send|submit|post|chat.send)\b|发送|發送|送信|전송/i;
 
 function sharedBody(row: Element, example: Element) {
   if (example.id && row.querySelectorAll('#' + CSS.escape(example.id)).length === 1) return '#' + CSS.escape(example.id);
@@ -58,6 +60,36 @@ export function candidateFrom(
   const semantic = region.getAttribute('role') === 'log' ? 8 : chatNames.test(names) ? 4 : 0;
   const score = semantic + Math.min(6, rows.length) + (body ? 4 : 0) + (fit ? 2 : 0);
   return { ...preview, rule, score };
+}
+
+export function completeCandidateRule(document: Document, region: Element, rule: ChatRule): ChatRule {
+  if (rule.composer && query(document, rule.composer)) return rule;
+  for (let parent = region.parentElement, depth = 0; parent && parent !== document.body && depth < 4;
+    parent = parent.parentElement, depth++) {
+    const inputs = Array.from(parent.querySelectorAll(editors)).filter(input =>
+      !region.contains(input) && !input.closest('[data-livechat-copilot], [role="search"]'));
+    const input = inputs.find(editor => chatNames.test([
+      editor.getAttribute('aria-label'), editor.getAttribute('placeholder'), editor.id,
+    ].join(' '))) ?? (inputs.length === 1 ? inputs[0] : undefined);
+    if (!input) continue;
+    const composer = selectorPath(document, input);
+    if (!composer || composer.length > 500) continue;
+    const controls = input.closest('form, yt-live-chat-message-input-renderer, [data-chat-composer]') ?? input.parentElement?.parentElement;
+    const send = Array.from(controls?.querySelectorAll('button, [role="button"], input[type="submit"]') ?? []).find(button =>
+      sendLabel.test([button.getAttribute('aria-label'), button.getAttribute('title'), button.id, button.textContent].join(' ')) ||
+      matches(button, 'button[type="submit"], input[type="submit"]'));
+    const sendButton = send ? selectorPath(document, send) : undefined;
+    return { ...rule, composer, sendButton: sendButton && sendButton.length <= 500 ? sendButton : undefined };
+  }
+  return rule;
+}
+
+export function composerElements(candidate: Candidate) {
+  const root = candidate.container.ownerDocument;
+  const editor = candidate.rule.composer ? query(root, candidate.rule.composer) : null;
+  if (!editor || !matches(editor, editors)) return { editor: null, button: null };
+  const button = candidate.rule.sendButton ? query(root, candidate.rule.sendButton) : null;
+  return { editor, button };
 }
 
 export function findCandidate(document: Document, page: URL, frame: URL, activity: ReadonlyMap<Element, number>) {

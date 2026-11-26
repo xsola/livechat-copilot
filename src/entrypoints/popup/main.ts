@@ -61,6 +61,7 @@ enabled.addEventListener('change', () => {
     if (checked) await prepareSite();
     site = await send('setSite', { tabId, enabled: checked, origin: site.origin });
     status.textContent = checked ? '已启用。请在设置中配置并授权模型。' : '已暂停本站翻译。';
+    if (checked) void chrome.tabs.sendMessage(tabId, { pageAction: 'initial-review' }).catch(() => undefined);
   }).finally(() => {
     enabled.checked = site.enabled;
     enabled.disabled = false;

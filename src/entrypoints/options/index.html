@@ -12,6 +12,9 @@
         <label>API Key <input id="key" type="password" autocomplete="off" maxlength="2048"></label>
         <p class="secondary">API Key 保存在扩展本地。DeepSeek 预设为 deepseek-flash，本地兼容服务可以留空密钥。</p>
         <label class="check"><input id="image" type="checkbox"> 此模型支持图像输入</label>
+        <label class="check"><input id="auto-vision" type="checkbox"> 自动复核新识别的候选规则</label>
+        <p class="secondary" id="image-status" role="status"></p>
+        <p class="secondary">开启后，针对候选规则向所选模型发送弹幕区裁图、可见且未输入草稿的发送区裁图和少量正文。</p>
         <label class="check"><input id="json" type="checkbox"> 请求 JSON 模式</label>
         <div class="field-row">
           <label>阅读语言 <input id="language" required placeholder="zh-CN" maxlength="48"></label>

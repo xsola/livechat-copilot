@@ -9,4 +9,6 @@ export const builtins: ChatRule[] = ['www.youtube.com', 'youtube.com'].map((host
   container: 'yt-live-chat-item-list-renderer #items',
   message: 'yt-live-chat-text-message-renderer, yt-live-chat-paid-message-renderer, yt-live-chat-membership-item-renderer',
   body: '#message',
+  composer: 'yt-live-chat-message-input-renderer #input[contenteditable="true"]',
+  sendButton: 'yt-live-chat-message-input-renderer #send-button button',
 }));

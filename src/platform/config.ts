@@ -17,12 +17,14 @@ export const settingsSchema = z.strictObject({
   mode: z.enum(['batch', 'single', 'manual']),
   prompt: z.string().max(2000),
   registryUrl: z.string().max(500),
+  autoVision: z.boolean().default(false),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export type PageSettings = Pick<Settings, 'readingLanguage' | 'mode'> & {
   enabled: boolean;
   modelConfigured: boolean;
   imageInput: boolean;
+  autoVision: boolean;
   revision: number;
 };
 
@@ -38,7 +40,17 @@ export const defaults: Settings = {
   mode: 'batch',
   prompt: defaultPrompt,
   registryUrl: '',
+  autoVision: false,
 };
+
+export function isTextOnlyModel(model: Pick<ModelConfig, 'endpoint' | 'model'>) {
+  try {
+    return new URL(model.endpoint).origin === 'https://api.deepseek.com' &&
+      model.model.toLowerCase() === 'deepseek-v4-pro';
+  } catch {
+    return false;
+  }
+}
 
 export function parseEndpoint(value: string) {
   const url = new URL(value);

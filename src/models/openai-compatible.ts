@@ -29,6 +29,12 @@ export class ModelError extends Error {
   }
 }
 
+export class ImageInputUnsupportedError extends ModelError {
+  constructor() {
+    super('当前模型接口不支持图片输入，已禁用自动图像复核。');
+  }
+}
+
 export async function complete(config: ModelConfig, options: RequestOptions, request = fetch) {
   const url = parseEndpoint(config.endpoint);
   url.pathname = url.pathname.replace(/\/+$/, '') + '/chat/completions';
@@ -66,7 +72,22 @@ export async function complete(config: ModelConfig, options: RequestOptions, req
     throw new ModelError('Model endpoint could not be reached within the request deadline.');
   }
   if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined);
+    if (options.image && [400, 415, 422].includes(response.status)) {
+      const detail = z.object({ error: z.object({
+        code: z.string().nullish(),
+        message: z.string().nullish(),
+      }) }).safeParse(await readJson(response, 16_000).catch(() => undefined));
+      if (detail.success) {
+        const { code, message } = detail.data.error;
+        const unsupportedCode = /^(?:image_input_unsupported|unsupported_image_input|vision_not_supported|text_only_model)$/i;
+        const unsupportedMessage = /(?:does not support|cannot accept) (?:image|vision)|(?:image input|vision).{0,35}(?:unsupported by|not supported by) .{0,20}model|only (?:supports? )?text|text.only model|不支持.{0,20}(?:图片|图像)输入/i;
+        if ((code && unsupportedCode.test(code)) || (message && unsupportedMessage.test(message))) {
+          throw new ImageInputUnsupportedError();
+        }
+      }
+    } else {
+      await response.body?.cancel().catch(() => undefined);
+    }
     throw new ModelError('Model endpoint returned HTTP ' + response.status + '.');
   }
   const result = completion.safeParse(await readJson(response, 512_000).catch(() => undefined));

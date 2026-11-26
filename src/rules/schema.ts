@@ -15,6 +15,8 @@ export const chatRule = z.strictObject({
   message: selector,
   body: selector.optional(),
   ignore: selector.optional(),
+  composer: selector.optional(),
+  sendButton: selector.optional(),
 });
 
 export const ruleIndex = z.strictObject({

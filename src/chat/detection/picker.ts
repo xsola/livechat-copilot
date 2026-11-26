@@ -1,7 +1,8 @@
-import { candidateFrom, visionSample, type Candidate } from './candidates';
+import { candidateFrom, completeCandidateRule, composerElements, visionSample, type Candidate } from './candidates';
 import { captureRect } from './viewport';
 import { send } from '../../platform/messages';
 import { PagePanel } from '../page-panel';
+import type { PageSettings } from '../../platform/config';
 
 export class Picker {
   private controller?: AbortController;
@@ -10,13 +11,14 @@ export class Picker {
   private cursor?: Element;
   private showing?: Candidate;
   private suppressed = false;
-  private reviewing = false;
+  private readonly reviews = new Map<string, string>();
+  private reviewQueue = Promise.resolve();
 
   constructor(
     private readonly panel: PagePanel,
     private readonly page: URL,
     private readonly frame: URL,
-    private readonly imageInput: () => boolean,
+    private readonly settings: () => PageSettings | undefined,
     private readonly save: (candidate: Candidate) => Promise<void>,
   ) {}
 
@@ -28,6 +30,10 @@ export class Picker {
 
   resumeSuggestions() {
     this.suppressed = false;
+  }
+
+  showMatched(candidate: Candidate, source: string) {
+    this.preview(candidate, source);
   }
 
   start(body = false) {
@@ -93,47 +99,107 @@ export class Picker {
     this.panel.button('关闭', () => this.close());
   }
 
-  private preview(candidate: Candidate) {
+  private preview(candidate: Candidate, source?: string) {
     this.endListeners();
+    candidate = {
+      ...candidate,
+      rule: completeCandidateRule(document, candidate.container, candidate.rule),
+    };
     this.showing = candidate;
     this.region = candidate.container;
     this.panel.highlight(candidate.container);
-    this.panel.show('确认弹幕区域', '检查下面几条消息。确认后将保存为本站的本地规则。', candidate);
-    this.panel.button('保存并启用规则', button => {
-      button.disabled = true;
-      void this.save(candidate).then(() => this.close(), error => {
-        button.disabled = false;
-        this.panel.note(error instanceof Error ? error.message : '无法保存规则。');
+    const { editor, button } = composerElements(candidate);
+    const controls = editor ? (button ? '已找到输入区和发送按钮。' : '已找到输入区，发送按钮暂未识别。') : '暂未找到可用的输入区。';
+    this.panel.show(source ? '已识别弹幕' : '确认弹幕区域',
+      (source ? '当前规则来源：' + source + '。' : '确认后保存为本站的本地规则。') + controls, candidate);
+    let saveButton: HTMLButtonElement | undefined;
+    if (!source) {
+      saveButton = this.panel.button('保存并启用规则', button => {
+        button.disabled = true;
+        void this.save(candidate).then(() => this.close(), error => {
+          button.disabled = false;
+          this.panel.note(error instanceof Error ? error.message : '无法保存规则。');
+        });
       });
-    });
-    this.panel.button('选择正文', () => this.start(true));
-    this.panel.button('重新选区', () => this.start());
-    if (this.imageInput()) {
-      this.panel.note('AI 复核会把候选区裁图和少量正文发送给你配置的模型。');
-      this.panel.button('AI 复核一次', button => { void this.review(candidate, button); });
+      this.panel.button('选择正文', () => this.start(true));
     }
+    this.panel.button('重新选区', () => this.start());
     this.panel.button('关闭', () => this.close());
+    if (!candidate.messages.length) {
+      this.panel.note('暂无正文样本，先使用本地规则。');
+      return;
+    }
+    const review = this.queueReview(candidate);
+    if (saveButton && review) {
+      const button = saveButton;
+      button.disabled = true;
+      void review.then(() => { button.disabled = false; });
+    }
   }
 
-  private async review(candidate: Candidate, button: HTMLButtonElement) {
-    if (this.reviewing || this.showing !== candidate) return;
-    this.reviewing = true;
-    button.disabled = true;
+  private queueReview(candidate: Candidate) {
+    const settings = this.settings();
+    if (!settings?.imageInput) {
+      this.panel.note('当前模型不支持或未启用图片输入，已跳过图像复核。');
+      return;
+    }
+    if (!settings.autoVision || !settings.modelConfigured) {
+      this.panel.note(settings.autoVision ? '请先在设置中授权模型服务。' : '自动图像复核未开启。');
+      return;
+    }
+    const key = JSON.stringify([settings.revision, candidate.rule]);
+    const existing = this.reviews.get(key);
+    if (existing) { this.panel.note(existing); return; }
+    this.panel.note('正在自动复核候选规则…');
+    this.reviewQueue = this.reviewQueue.then(async () => {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      if (this.showing !== candidate) return;
+      const text = this.reviews.get(key) ?? await this.review(candidate);
+      if (text) {
+        if (!text.includes('截图权限') && !text.includes('不在前台')) {
+          this.reviews.set(key, text);
+          if (this.reviews.size > 30) this.reviews.delete(this.reviews.keys().next().value!);
+        }
+        if (this.showing === candidate) this.panel.note(text);
+      }
+    });
+    return this.reviewQueue;
+  }
+
+  private async review(candidate: Candidate) {
+    if (!candidate.container.isConnected || document.visibilityState !== 'visible') {
+      return '直播标签页当前不在前台，已跳过图像复核。';
+    }
     try {
       const rect = captureRect(candidate.container);
+      const { editor, button } = composerElements(candidate);
+      const hasDraft = () => Boolean((editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement
+        ? editor.value : editor?.textContent)?.trim());
+      const optionalCrop = (element: Element | null) => {
+        if (!element) return;
+        try { return captureRect(element); } catch { return undefined; }
+      };
       this.panel.captureVisibility(false);
-      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      const result = await send('verify', { rect, ...visionSample(candidate) });
-      if (this.showing === candidate) {
-        const prefix = { 'likely-chat': '可能是弹幕区', 'unlikely-chat': '可能选错了区域', uncertain: '无法确定' }[result.verdict];
-        this.panel.note(prefix + '。' + result.reason);
-      }
+      await new Promise<void>(resolve => {
+        const timeout = setTimeout(resolve, 160);
+        requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timeout); resolve(); }));
+      });
+      if (this.showing !== candidate || !candidate.container.isConnected) return;
+      if (document.visibilityState !== 'visible') return '直播标签页当前不在前台，已跳过图像复核。';
+      const editorRect = editor === document.activeElement || hasDraft() ? undefined : optionalCrop(editor);
+      const sendRect = editorRect ? optionalCrop(button) : undefined;
+      const result = await send('verify', { rect, editorRect, sendRect, ...visionSample(candidate) });
+      const prefix = { 'likely-chat': '可能是弹幕区', 'unlikely-chat': '可能选错了弹幕区', uncertain: '无法确定弹幕区' }[result.verdict];
+      const composer = result.composerVerdict && {
+        'likely-composer': '发送区可能匹配',
+        'unlikely-composer': '发送区可能不匹配',
+        uncertain: '无法确定发送区',
+      }[result.composerVerdict];
+      return [prefix, composer, result.reason].filter(Boolean).join('。');
     } catch (error) {
-      if (this.showing === candidate) this.panel.note(error instanceof Error ? error.message : 'AI 复核失败。');
+      return error instanceof Error ? error.message : '自动图像复核失败。';
     } finally {
       this.panel.captureVisibility(true);
-      this.reviewing = false;
-      // The current preview stays one-shot. A newly selected candidate can be checked again.
     }
   }
 

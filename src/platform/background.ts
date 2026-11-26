@@ -1,10 +1,11 @@
 import { createTasks } from '../models/tasks';
+import { ImageInputUnsupportedError } from '../models/openai-compatible';
 import { resolveRules, decideRule } from '../rules/resolver';
 import { summarizeRules, syncRegistry } from '../rules/registry';
 import { ruleMatches } from '../rules/schema';
 import { updateUsage } from '../usage/usage';
-import { hostPattern, isYouTube, parseEndpoint, parseRegistry, type Settings } from './config';
-import { editState, readState } from './store';
+import { hostPattern, isTextOnlyModel, isYouTube, parseEndpoint, parseRegistry, type Settings } from './config';
+import { editState, readState, type State } from './store';
 import type { RoomPreference } from './store';
 import { captureCandidate } from './capture';
 import { parseCommand, type SiteState } from './messages';
@@ -59,6 +60,14 @@ function webUrl(value?: string) {
   const url = new URL(value);
   if (!['https:', 'http:'].includes(url.protocol)) throw new Error('This page does not support live chat detection.');
   return url;
+}
+
+function imageModelKey(settings: Settings) {
+  return JSON.stringify([settings.model.endpoint, settings.model.model]);
+}
+
+function imageUnavailable(state: State) {
+  return isTextOnlyModel(state.settings.model) || state.rejectedVisionModel === imageModelKey(state.settings);
 }
 
 async function authorizedModel(settings: Settings) {
@@ -121,7 +130,8 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       const granted = await chrome.permissions.contains({ origins: [hostPattern(parseEndpoint(state.settings.model.endpoint))] });
       return {
         settings: {
-          enabled, modelConfigured: granted, imageInput: state.settings.model.imageInput, revision: state.revision,
+          enabled, modelConfigured: granted, imageInput: state.settings.model.imageInput && !imageUnavailable(state),
+          autoVision: state.settings.autoVision, revision: state.revision,
           readingLanguage: state.settings.readingLanguage, mode: state.settings.mode,
         },
         rules: resolveRules(page, frame, state.localRules, state.community),
@@ -156,12 +166,27 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
     case 'verify': {
       const key = 'vision:' + tab.id;
       if (checksInFlight.has(key)) throw new Error('Image verification is already running for this tab.');
-      if (!state.settings.model.imageInput) throw new Error('Image input is disabled for the selected model.');
+      if (!state.settings.autoVision) throw new Error('自动图像复核未开启。');
+      if (!state.settings.model.imageInput || imageUnavailable(state)) {
+        throw new ImageInputUnsupportedError();
+      }
       checksInFlight.add(key);
       try {
         const settings = await authorizedModel(state.settings);
-        const { rect, html, samples } = cmd.payload;
-        return await tasks.vision(settings, await captureCandidate(tab, rect), { html, samples });
+        const { rect, editorRect, sendRect, html, samples } = cmd.payload;
+        const image = await captureCandidate(tab, [rect, editorRect, sendRect].filter(r => r !== undefined));
+        if ((await readState()).revision !== state.revision) throw new Error('模型设置已变化，已跳过复核。');
+        return await tasks.vision(settings, image, { html, samples, editorImage: Boolean(editorRect), sendImage: Boolean(sendRect) });
+      } catch (error) {
+        if (error instanceof ImageInputUnsupportedError) {
+          await editState(latest => ({
+            changes: imageModelKey(latest.settings) === imageModelKey(state.settings)
+              ? { rejectedVisionModel: imageModelKey(state.settings) } : {},
+            result: undefined,
+          }));
+          refreshPages();
+        }
+        throw error;
       } finally {
         checksInFlight.delete(key);
       }
@@ -220,7 +245,7 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
   switch (cmd.kind) {
     case 'getSettings': {
       const state = await readState();
-      return { settings: state.settings, rules: summarizeRules(state) };
+      return { settings: state.settings, rules: summarizeRules(state), imageUnavailable: imageUnavailable(state) };
     }
     case 'saveSettings': {
       parseEndpoint(cmd.payload.model.endpoint);
@@ -229,6 +254,7 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
         changes: {
           settings: cmd.payload,
           revision: state.revision + 1,
+          ...(!state.settings.model.imageInput && cmd.payload.model.imageInput ? { rejectedVisionModel: null } : {}),
           ...(state.settings.registryUrl === cmd.payload.registryUrl ? {} :
             { community: { active: [], staged: [], rejected: {} } }),
         },

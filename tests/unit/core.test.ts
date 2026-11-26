@@ -75,6 +75,16 @@ test('provider retries empty output once and records tokens for both attempts', 
   assert.deepEqual(events.map(event => [event.success, event.inputTokens]), [[false, 42], [true, 42]]);
 });
 
+test('an empty visual result spends at most one request', async () => {
+  let calls = 0;
+  const tasks = createTasks(async () => undefined, async () => {
+    calls++;
+    return Response.json({ choices: [{ message: { content: ' ' } }] });
+  });
+  await assert.rejects(tasks.vision(defaults, 'data:image/png;base64,fixture', {}), /empty answer/);
+  assert.equal(calls, 1);
+});
+
 test('scheduler invalidates stale results and reuses identical text within a batch and in its cache', async () => {
   const calls: Array<Array<{ id: string; text: string }>> = [];
   const received: string[] = [];

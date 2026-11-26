@@ -25,7 +25,13 @@ const payloads = {
     revision: z.number().int().nonnegative(),
     items: z.array(z.object({ id, text: z.string().min(1).max(600) })).min(1).max(12),
   }),
-  verify: z.object({ rect, html: z.string().min(1).max(12000), samples: z.array(z.string().max(300)).min(1).max(10) }),
+  verify: z.object({
+    rect,
+    editorRect: rect.optional(),
+    sendRect: rect.optional(),
+    html: z.string().min(1).max(12000),
+    samples: z.array(z.string().max(300)).min(1).max(10),
+  }),
   usage: z.partialRecord(pageCounter, z.number().int().positive().max(10000)),
   getSettings: z.undefined(),
   saveSettings: settingsSchema,
@@ -62,7 +68,7 @@ interface Results {
   translate: TranslationItem[];
   verify: VisionAdvice;
   usage: void;
-  getSettings: { settings: Settings; rules: RuleSummary };
+  getSettings: { settings: Settings; rules: RuleSummary; imageUnavailable: boolean };
   saveSettings: void;
   connection: void;
   syncRegistry: RuleSummary;

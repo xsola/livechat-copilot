@@ -18,9 +18,15 @@
       </yt-live-chat-text-message-renderer>
     </div>
   </yt-live-chat-item-list-renderer>
-  <div id="alternate" role="log">
-    <article class="chat-row"><b class="username">AltOne</b> <span class="message-body">New tournament</span></article>
-    <article class="chat-row"><b class="username">AltTwo</b> <span class="message-body">Ready for the finals</span></article>
-  </div>
+  <section id="alternate-chat">
+    <div id="alternate" role="log">
+      <article class="chat-row"><b class="username">AltOne</b> <span class="message-body">New tournament</span></article>
+      <article class="chat-row"><b class="username">AltTwo</b> <span class="message-body">Ready for the finals</span></article>
+    </div>
+    <form data-chat-composer>
+      <textarea id="chat-editor" aria-label="Chat message"></textarea>
+      <button id="chat-send" type="submit">Send</button>
+    </form>
+  </section>
 </body>
 </html>

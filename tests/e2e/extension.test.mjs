@@ -21,9 +21,16 @@ async function boot(t) {
     requestLog.push(value);
     const content = value.messages[1].content;
     const command = JSON.parse(Array.isArray(content) ? content[0].text : content);
+    if (Array.isArray(content) && value.model === 'test-text-only') {
+      response.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+        error: { message: 'This model does not support image input.', code: 'image_input_unsupported' },
+      }));
+      return;
+    }
     const items = command.items ?? [];
     if (items.some(item => item.text === 'Slow original')) await new Promise(resolve => setTimeout(resolve, 900));
-    const output = Array.isArray(content) ? { verdict: 'likely-chat', reason: 'Synthetic region confirmed.' }
+    const output = Array.isArray(content) ? { verdict: 'likely-chat', reason: 'Synthetic region confirmed.',
+      composerVerdict: command.sample.editorImage ? 'likely-composer' : undefined }
       : items.length ? { translations: items.map(({ id, text }) => ({ id, text: '译：' + text })) }
       : command.check ? { ok: true } : { language: 'en', title: null, streamer: null, category: null };
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
@@ -42,7 +49,7 @@ async function boot(t) {
       await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   });
-  const built = path.resolve('.output/chrome-mv3');
+  const built = path.resolve('dist/chrome-mv3');
   const unpacked = path.join(root, 'extension');
   await cp(built, unpacked, { recursive: true });
   const manifestPath = path.join(unpacked, 'manifest.json');
@@ -102,6 +109,25 @@ async function until(check) {
   assert.fail('Expected asynchronous state was not reached.');
 }
 
+test('the visible dist directory loads without modifying the manifest', { timeout: 25_000 }, async t => {
+  const unpacked = path.resolve('dist/chrome-mv3');
+  const manifest = JSON.parse(await readFile(path.join(unpacked, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.manifest_version, 3);
+  assert.equal(manifest.host_permissions.includes('<all_urls>'), false);
+  const root = await mkdtemp(path.join(tmpdir(), 'livechat-copilot-install-'));
+  let context;
+  t.after(async () => {
+    try { await context?.close(); }
+    finally { await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
+  });
+  context = await chromium.launchPersistentContext(root, {
+    channel: 'chromium', headless: true,
+    args: ['--disable-extensions-except=' + unpacked, '--load-extension=' + unpacked],
+  });
+  const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', { timeout: 12_000 });
+  assert.equal(await worker.evaluate(() => chrome.runtime.getManifest().name), 'LiveChat Copilot');
+});
+
 test('YouTube iframe translates incrementally, saves a manual override, and reuses it after reload', { timeout: 65_000 }, async t => {
   const { context, options, origin, requestLog } = await boot(t);
   const live = await context.newPage();
@@ -133,6 +159,10 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await chat.getByText('译：Fresh content').waitFor();
   assert.equal(await chat.getByText('译：Slow original').count(), 0);
 
+  await options.locator('#auto-vision').check();
+  await options.getByRole('button', { name: '保存并授权' }).click();
+  await options.getByText('已保存。', { exact: true }).waitFor();
+  await live.bringToFront();
   await popup.getByRole('button', { name: '选择弹幕区域' }).click();
   await chat.getByText('移动鼠标高亮元素', { exact: false }).waitFor();
   await chat.getByText('New tournament', { exact: true }).hover();
@@ -144,10 +174,10 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await chat.getByText('New tournament', { exact: true }).hover();
   await chat.getByText('New tournament', { exact: true }).click();
   await chat.getByRole('button', { name: '保存并启用规则' }).waitFor();
-  await live.bringToFront();
-  await chat.getByRole('button', { name: 'AI 复核一次' }).click();
   await chat.getByText('Synthetic region confirmed.', { exact: false }).waitFor();
+  await chat.getByText('发送区可能匹配', { exact: false }).waitFor();
   assert.ok(requestLog.some(body => JSON.stringify(body).includes('data:image/jpeg;base64,')));
+  assert.equal(await chat.getByRole('button', { name: 'AI 复核一次' }).count(), 0);
   await chat.getByRole('button', { name: '保存并启用规则' }).click();
   await chat.getByText('译：New tournament').waitFor();
   await live.reload();
@@ -216,4 +246,30 @@ test('new site candidates and a staged community rule roll back to the last usab
   await options.getByText('社区规则：1 条已验证，0 条待验证。').waitFor();
   await live.reload();
   await live.getByText('译：New tournament', { exact: true }).waitFor();
+});
+
+test('an endpoint that rejects images disables later visual checks while text translation still works', { timeout: 45_000 }, async t => {
+  const { context, options, requestLog } = await boot(t);
+  await options.locator('#model').fill('test-text-only');
+  await options.locator('#auto-vision').check();
+  await options.getByRole('button', { name: '保存并授权' }).click();
+  await options.getByText('已保存。', { exact: true }).waitFor();
+  const live = await context.newPage();
+  await live.goto('https://www.youtube.com/watch?v=one');
+  await live.bringToFront();
+  const chat = live.frameLocator('#chatframe');
+  await chat.getByText('Amazing comeback').waitFor();
+  const tab = await tabId(options, live.url());
+  await action(options, tab, 'detect');
+  await chat.getByText('当前模型接口不支持图片输入，已禁用自动图像复核。').waitFor();
+  assert.equal((await command(options, 'getSettings')).imageUnavailable, true);
+  await live.reload();
+  await action(options, tab, 'detect');
+  await chat.getByText('当前模型不支持或未启用图片输入，已跳过图像复核。').waitFor();
+  assert.equal(requestLog.filter(body => Array.isArray(body.messages[1].content)).length, 1);
+  await command(options, 'setSite', { tabId: tab, enabled: true, origin: 'https://www.youtube.com' });
+  await chat.getByText('译：Amazing comeback 🎉').waitFor();
+  await options.reload();
+  await options.getByText('当前模型接口不支持图片输入', { exact: false }).waitFor();
+  assert.equal(await options.locator('#auto-vision').isDisabled(), true);
 });

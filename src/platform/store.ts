@@ -1,4 +1,4 @@
-import { defaults, type Settings } from './config';
+import { defaults, settingsSchema, type Settings } from './config';
 import type { ChatRule } from '../rules/schema';
 import type { CommunityRules } from '../rules/resolver';
 import type { DailyUsage } from '../usage/usage';
@@ -16,6 +16,7 @@ export interface State {
   community: CommunityRules;
   roomPreferences: Record<string, RoomPreference>;
   usage: DailyUsage[];
+  rejectedVisionModel: string | null;
 }
 
 const initial: State = {
@@ -26,13 +27,15 @@ const initial: State = {
   community: { active: [], staged: [], rejected: {} },
   roomPreferences: {},
   usage: [],
+  rejectedVisionModel: null,
 };
 
 let pendingWrites: Promise<unknown> = Promise.resolve();
 
 export async function readState(): Promise<State> {
   const stored = await chrome.storage.local.get(Object.keys(initial));
-  return { ...structuredClone(initial), ...stored };
+  const settings = settingsSchema.safeParse(stored.settings);
+  return { ...structuredClone(initial), ...stored, settings: settings.success ? settings.data : structuredClone(defaults) };
 }
 
 export function editState<T>(edit: (state: State) => { changes: Partial<State>; result: T }): Promise<T> {
