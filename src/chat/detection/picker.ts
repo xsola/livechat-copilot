@@ -1,9 +1,16 @@
 import { candidateFrom, candidateFromExample, completeCandidateRule, composerElements, visionSample, type Candidate } from './candidates';
 import { captureRect, visibleBounds } from './viewport';
 import { send } from '../../platform/messages';
-import { PagePanel } from '../page-panel';
+import { PagePanel, type ReviewFeedback } from '../page-panel';
 import type { PageSettings } from '../../platform/config';
 import { testRule } from '../dom';
+import type { BodyVerdict } from '../../models/tasks';
+
+function bodyFeedback(verdict?: BodyVerdict) {
+  if (verdict === 'clean') return '正文样本未见昵称、徽章或时间戳混入。';
+  if (verdict === 'mixed-metadata') return '正文可能混入昵称、徽章或时间戳，请重新核对。';
+  return verdict === 'uncertain' ? '模型无法确认样本是否只包含正文。' : '模型未单独判断正文。';
+}
 
 function resizeSelection(selected: Element, cursor: Element | undefined, grow: boolean, previousLevel?: Element) {
   const current = visibleBounds(selected);
@@ -31,7 +38,7 @@ export class Picker {
   private showing?: Candidate;
   private searching = false;
   private searchEpoch = 0;
-  private readonly reviews = new Map<string, { text: string; reason?: string }>();
+  private readonly reviews = new Map<string, ReviewFeedback>();
 
   constructor(
     private readonly panel: PagePanel,
@@ -71,7 +78,7 @@ export class Picker {
     return this.searching;
   }
 
-  noCandidate(reason = '没有找到能稳定提取弹幕的区域。', unresolved?: Element) {
+  noCandidate(reason = '没有找到能稳定提取弹幕的区域。', unresolved?: Element, review?: ReviewFeedback) {
     if (!this.searching) return;
     this.searching = false;
     if (unresolved?.isConnected) {
@@ -81,6 +88,7 @@ export class Picker {
       this.panel.highlight();
       this.panel.show('未找到弹幕区', reason + '可从工具栏打开「手动选择弹幕区」。');
     }
+    if (review) this.panel.showReview(review);
     this.panel.button('关闭', () => this.close());
   }
 
@@ -106,7 +114,11 @@ export class Picker {
         return [{ candidate, rect }];
       } catch { return []; }
     });
-    if (!visible.length) { this.noCandidate(undefined, unresolved); return; }
+    if (!visible.length) {
+      this.noCandidate(undefined, unresolved, { state: 'skipped', lines: [candidates.length
+        ? '候选区域当前不可截图，可滚动到可见范围后重试。' : '没有找到可供截图核验的候选。'] });
+      return;
+    }
     this.searchProgress('正在让模型对照候选区域截图和弹幕样本…');
     try {
       await this.hideForCapture();
@@ -122,7 +134,10 @@ export class Picker {
         areas.push({ id, rect, editorRect, ...visionSample(candidate) });
         if (areas.length === 3) break;
       }
-      if (!areas.length) { this.noCandidate(undefined, unresolved); return; }
+      if (!areas.length) {
+        this.noCandidate(undefined, unresolved, { state: 'skipped', lines: ['候选区域已变化，未进行截图核验。'] });
+        return;
+      }
       const result = await send('locateChat', areas);
       if (!this.searching || this.searchEpoch !== attempt) return;
       const selected = result.candidateId ? candidatesById.get(result.candidateId) : undefined;
@@ -130,11 +145,18 @@ export class Picker {
       if (selected?.container.isConnected && verified && !verified.rejected && verified.messages.length >= 2) {
         const excludeComposer = result.useComposer === false && areas.some(area => area.id === result.candidateId && area.editorRect);
         if (excludeComposer) selected.rule = { ...selected.rule, composer: undefined, sendButton: undefined };
-        this.preview({ ...selected, messages: verified.messages }, { located: true, excludeComposer });
+        this.preview({ ...selected, messages: verified.messages }, { excludeComposer, located: {
+          state: result.bodyVerdict === 'clean' ? 'done' : 'warning',
+          lines: ['已用截图比对候选位置。', bodyFeedback(result.bodyVerdict)], reason: result.reason,
+        } });
       }
-      else this.noCandidate(undefined, unresolved);
+      else this.noCandidate(undefined, unresolved, {
+        state: 'warning', lines: ['模型或本地校验未能确认可用的弹幕候选。'], reason: result.reason,
+      });
     } catch (error) {
-      if (this.searchEpoch === attempt) this.noCandidate(error instanceof Error ? error.message + ' ' : undefined);
+      if (this.searchEpoch === attempt) this.noCandidate(undefined, unresolved, {
+        state: 'skipped', lines: [error instanceof Error ? error.message : '截图核验失败。'],
+      });
     } finally {
       this.panel.captureVisibility(true);
     }
@@ -231,7 +253,7 @@ export class Picker {
     this.panel.button('关闭', () => this.close());
   }
 
-  private preview(candidate: Candidate, automatic?: { source?: string; located?: boolean; excludeComposer?: boolean; localOnly?: boolean }, adjusted = false) {
+  private preview(candidate: Candidate, automatic?: { source?: string; located?: ReviewFeedback; excludeComposer?: boolean; localOnly?: boolean }, adjusted = false) {
     this.endListeners();
     this.searching = false;
     candidate = {
@@ -268,62 +290,64 @@ export class Picker {
       document.addEventListener('keydown', dismiss, { capture: true, signal });
       if (window.top !== window) window.top?.document.addEventListener('keydown', dismiss, { capture: true, signal });
     }
-    if (!source) {
-      this.panel.button('保存并启用规则', button => {
+    const saveButton = source ? undefined : this.panel.button('保存并启用规则', button => {
         button.disabled = true;
         void this.save(candidate).then(() => this.close(), error => {
           button.disabled = false;
           this.panel.note(error instanceof Error ? error.message : '无法保存规则。');
         });
-      });
-    }
+    });
     if (!automatic && !adjusted) {
       this.panel.button('点一条弹幕正文', () => this.start(true));
       this.panel.button('手动选整个弹幕区', () => this.start());
     }
     this.panel.button('关闭', () => this.close());
     if (!candidate.messages.length) {
-      this.panel.note('暂无正文样本，先使用本地规则。');
+      this.panel.showReview({ state: 'skipped', lines: ['暂无正文样本，先使用本地规则。'] });
       return;
     }
-    if (located) { this.panel.note('已用截图比对候选位置。'); return; }
-    if (automatic?.localOnly) return;
-    void this.queueReview(candidate, !automatic);
+    if (located) { this.panel.showReview(located); return; }
+    if (automatic?.localOnly) {
+      this.panel.showReview({ state: 'skipped', lines: ['当前候选来自本地识别。可从工具栏重新发起自动识别。'] });
+      return;
+    }
+    void this.queueReview(candidate, !automatic, saveButton);
   }
 
-  private queueReview(candidate: Candidate, showReason: boolean) {
+  private async queueReview(candidate: Candidate, showReason: boolean, saveButton?: HTMLButtonElement) {
     const settings = this.settings();
     if (!settings?.imageInput) {
-      this.panel.note(settings?.imageInput === false
+      this.panel.showReview({ state: 'skipped', lines: [settings?.imageInput === false
         ? '当前模型不支持图片输入，已跳过截图核验。'
-        : '模型的图片能力尚未确认，可在设置中测试。');
+        : '模型的图片能力尚未确认，可在设置中测试。'] });
       return;
     }
     if (!settings.autoVision || !settings.modelConfigured) {
-      this.panel.note(settings.autoVision ? '请先在设置中授权模型服务。' : '截图核验未开启。');
+      this.panel.showReview({ state: 'skipped', lines: [settings.autoVision ? '请先在设置中授权模型服务。' : '截图核验未开启。'] });
       return;
     }
     const { state, button } = composerElements(candidate);
     const key = JSON.stringify([settings.revision, candidate.rule, state, Boolean(button)]);
     const existing = this.reviews.get(key);
-    const display = ({ text, reason }: { text: string; reason?: string }) => {
-      this.panel.note(showReason && reason ? text + '。' + reason : text);
-    };
-    if (existing) { display(existing); return; }
-    this.panel.note('正在自动复核候选规则…');
-    return (async () => {
-      await new Promise(resolve => setTimeout(resolve, 250));
-      if (this.showing !== candidate) return;
-      const result = this.reviews.get(key) ?? await this.review(candidate);
-      if (result) {
-        if (!result.text.includes('截图权限') && !result.text.includes('不在前台')) {
-          this.reviews.set(key, result);
-          if (this.reviews.size > 30) this.reviews.delete(this.reviews.keys().next().value!);
-        }
-        if (this.showing === candidate) display(result);
-      }
-      return result;
-    })();
+    if (existing) { this.panel.showReview(existing, showReason); return; }
+    let skipped = false;
+    if (saveButton) saveButton.disabled = true;
+    this.panel.showReview({ state: 'pending', lines: ['正在检查绿框位置和提取的正文样本。'] }, false, () => {
+      skipped = true;
+      if (saveButton) saveButton.disabled = false;
+      this.panel.showReview({ state: 'skipped', lines: ['已跳过核验。请自行确认当前规则。'] });
+    });
+    await new Promise(resolve => setTimeout(resolve, 250));
+    if (this.showing !== candidate || skipped) return;
+    const result = this.reviews.get(key) ?? await this.review(candidate, () => skipped);
+    if (this.showing !== candidate || skipped) return;
+    if (saveButton) saveButton.disabled = false;
+    if (!result) return;
+    if (result.state !== 'skipped') {
+      this.reviews.set(key, result);
+      if (this.reviews.size > 30) this.reviews.delete(this.reviews.keys().next().value!);
+    }
+    this.panel.showReview(result, showReason);
   }
 
   private async hideForCapture() {
@@ -344,16 +368,18 @@ export class Picker {
     try { return captureRect(element); } catch { return undefined; }
   }
 
-  private async review(candidate: Candidate) {
+  private async review(candidate: Candidate, skipped: () => boolean): Promise<ReviewFeedback | undefined> {
     if (!candidate.container.isConnected || document.visibilityState !== 'visible') {
-      return { text: '直播标签页当前不在前台，已跳过图像复核。' };
+      return { state: 'skipped', lines: ['直播标签页当前不在前台，已跳过图像复核。'] };
     }
     try {
       const rect = captureRect(candidate.container);
       const { editor, button } = composerElements(candidate);
       await this.hideForCapture();
-      if (this.showing !== candidate || !candidate.container.isConnected) return;
-      if (document.visibilityState !== 'visible') return { text: '直播标签页当前不在前台，已跳过图像复核。' };
+      if (this.showing !== candidate || skipped()) return;
+      if (!candidate.container.isConnected || document.visibilityState !== 'visible') {
+        return { state: 'skipped', lines: ['页面已变化或直播标签页当前不在前台。'] };
+      }
       const editorRect = this.editorCrop(editor);
       const sendRect = editorRect ? this.optionalCrop(button) : undefined;
       const result = await send('verify', { rect, editorRect, sendRect, ...visionSample(candidate) });
@@ -363,10 +389,10 @@ export class Picker {
         'unlikely-composer': '发送区可能不匹配',
         uncertain: '无法确定发送区',
       }[result.composerVerdict];
-      const rejected = result.verdict === 'unlikely-chat';
-      return { text: [prefix, composer, rejected ? '建议点一条实际弹幕重新识别' : ''].filter(Boolean).join('。'), reason: result.reason };
+      const needsAttention = result.verdict !== 'likely-chat' || result.bodyVerdict !== 'clean' || result.composerVerdict === 'unlikely-composer';
+      return { state: needsAttention ? 'warning' : 'done', lines: [prefix, bodyFeedback(result.bodyVerdict), ...(composer ? [composer] : [])], reason: result.reason };
     } catch (error) {
-      return { text: error instanceof Error ? error.message : '自动图像复核失败。' };
+      return { state: 'skipped', lines: [error instanceof Error ? error.message : '自动图像复核失败。'] };
     } finally {
       this.panel.captureVisibility(true);
     }

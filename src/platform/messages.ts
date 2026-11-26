@@ -3,7 +3,7 @@ import { languageCode, modelConfig, settingsSchema, type PageSettings, type Sett
 import { chatRule, type RuleMatch } from '../rules/schema';
 import { pageCounter, type DailyUsage } from '../usage/usage';
 import type { RoomPreference } from './store';
-import type { ModelProbe, RoomProfile, TranslationItem, VisionAdvice } from '../models/tasks';
+import type { ChatLocation, ModelProbe, RoomProfile, TranslationItem, VisionAdvice } from '../models/tasks';
 import { promptTasks, type PromptTask } from '../models/prompts';
 import { scopeType, type ScopeOption, type TranslationScope } from './translation-scope';
 
@@ -110,7 +110,7 @@ interface Results {
   decideRule: void;
   translate: TranslationItem[];
   verify: VisionAdvice;
-  locateChat: { candidateId: string | null; useComposer?: boolean; reason: string };
+  locateChat: ChatLocation;
   usage: void;
   getSettings: { settings: Settings; browserLanguage: string; rules: RuleSummary; imageUnavailable: boolean };
   saveSettings: void;

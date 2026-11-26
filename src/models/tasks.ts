@@ -12,11 +12,19 @@ const translationOutput = z.object({
     text: z.string().trim().min(1).max(3000),
   })).max(12),
 });
+const bodyVerdict = z.enum(['clean', 'mixed-metadata', 'uncertain']);
+export type BodyVerdict = z.infer<typeof bodyVerdict>;
+
 export const visionOutput = z.object({
   verdict: z.enum(['likely-chat', 'unlikely-chat', 'uncertain']),
   reason: z.string().trim().min(1).max(400),
   composerVerdict: z.enum(['likely-composer', 'unlikely-composer', 'uncertain']).optional(),
+  bodyVerdict: bodyVerdict.optional(),
 });
+const chatLocation = z.object({
+  candidateId: z.string().nullable(), useComposer: z.boolean().optional(), bodyVerdict: bodyVerdict.optional(), reason: z.string().max(400),
+});
+export type ChatLocation = z.infer<typeof chatLocation>;
 export const roomOutput = z.object({
   language: languageCode.nullable(),
   title: z.string().max(200).nullable(),
@@ -105,11 +113,12 @@ export function createTasks(meter: Meter, request = fetch) {
         'Find the live chat message list and its chat input if visible. The screenshot contains candidate crops in the given order, stacked from top to bottom. ' +
         'For each ID, the chat crop is first, followed by a crop of its candidate editor only when editorImage is true. ' +
         'Match the repeated rows visible in the image to the candidate HTML and message samples. When IDs show the same list, choose the samples containing the full message without sender names or badges. Ignore player buttons, stream labels, ' +
-        'static comments and unrelated lists. Pick only an ID from candidates. Return {"candidateId":"id","useComposer":true,"reason":"short explanation"}. ' +
+        'static comments and unrelated lists. Pick only an ID from candidates. Return {"candidateId":"id","useComposer":true,"bodyVerdict":"clean|mixed-metadata|uncertain","reason":"short explanation"}. ' +
+        'For the selected ID, mark bodyVerdict as mixed-metadata if the extracted samples include sender names, badges or timestamps from the page layout. ' +
         'Set useComposer to false when the proposed editor is visible but is not the chat input. Omit useComposer when no editor crop was provided. ' +
         'Use a null candidateId when the live chat is not shown. Explain briefly in the requested language.',
         { candidates, language: settings.readingLanguage }, value => {
-          const result = requireResult(z.object({ candidateId: z.string().nullable(), useComposer: z.boolean().optional(), reason: z.string().max(400) }), value);
+          const result = requireResult(chatLocation, value);
           if (result.candidateId && !candidates.some(candidate => candidate.id === result.candidateId)) {
             throw new ModelError('模型返回了未知弹幕区域。');
           }

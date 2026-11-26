@@ -30,13 +30,16 @@ async function boot(t, locale = 'zh-CN') {
     }
     const items = command.items ?? [];
     if (items.some(item => item.text === 'Slow original')) await new Promise(resolve => setTimeout(resolve, 900));
-    if (command.candidates) await new Promise(resolve => setTimeout(resolve, 650));
+    if (command.candidates || (command.sample && value.model === 'test-review-mixed')) {
+      await new Promise(resolve => setTimeout(resolve, 650));
+    }
     const output = command.candidates ? {
       candidateId: command.candidates[/^test-paired-(input|body)$/.test(value.model) ? 1 : 0].id,
-      useComposer: true, reason: 'Image matches the sample rows.',
+      useComposer: true, bodyVerdict: 'clean', reason: 'Image matches the sample rows.',
     }
       : command.test === 'image-capability' ? { color: 'blue' }
       : Array.isArray(content) ? { verdict: 'likely-chat', reason: 'Synthetic region confirmed.',
+        bodyVerdict: value.model === 'test-review-mixed' ? 'mixed-metadata' : 'clean',
         composerVerdict: command.sample.editorImage ? 'likely-composer' : 'unlikely-composer' }
       : items.length ? { translations: items.map(({ id, text }) => ({ id, text: '译：' + text })) }
       : command.languageInput ? { language: 'ja' }
@@ -179,6 +182,34 @@ test('YouTube restricted input is recognized without inferring a send-area misma
   await chat.getByText('发送区可能匹配', { exact: false }).waitFor();
   assert.equal(payloads()[1].editorImage, true);
   assert.equal(payloads()[1].sendImage, true);
+});
+
+test('automatic review shows a body warning separately from a successful region match', { timeout: 35_000 }, async t => {
+  const { context, options } = await boot(t);
+  await options.locator('#model').fill('test-review-mixed');
+  await options.getByRole('button', { name: '测试当前模型' }).click();
+  await options.getByText('支持', { exact: true }).waitFor();
+  await options.locator('#auto-vision').check();
+  await options.getByRole('button', { name: '保存并授权' }).click();
+  await options.getByText('已保存。', { exact: true }).waitFor();
+  const live = await context.newPage();
+  await live.goto('https://www.youtube.com/watch?v=review');
+  await live.bringToFront();
+  const tab = await tabId(options, live.url());
+  await action(options, tab, 'detect');
+  const panel = live.frameLocator('#chatframe').getByRole('region', { name: 'LiveChat Copilot' });
+  await panel.getByText('截图核验 · 正在核验', { exact: true }).waitFor();
+  await panel.getByText('截图核验 · 请核对', { exact: true }).waitFor();
+  await panel.getByText('可能是弹幕区', { exact: true }).waitFor();
+  await panel.getByText('正文可能混入昵称、徽章或时间戳，请重新核对。', { exact: true }).waitFor();
+  const explanation = panel.getByText('Synthetic region confirmed.', { exact: true });
+  assert.equal(await explanation.isVisible(), false);
+  await panel.getByText('查看模型说明', { exact: true }).click();
+  await explanation.waitFor();
+  await live.reload();
+  await action(options, tab, 'detect');
+  await panel.getByRole('button', { name: '跳过核验' }).click();
+  await panel.getByText('已跳过核验。请自行确认当前规则。', { exact: true }).waitFor();
 });
 
 test('YouTube iframe translates incrementally, saves a manual override, and reuses it after reload', { timeout: 65_000 }, async t => {

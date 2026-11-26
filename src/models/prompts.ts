@@ -29,7 +29,8 @@ export function taskInstructions(task: PromptTask, settings: Pick<Settings, 'pro
         'Return {"language":null,"title":null,"streamer":null,"category":null}. Do not invent facts.';
     case 'vision':
       return custom + '\n\nThe image shows chat first, followed by the editor and send control when indicated. ' +
-        'Return {"verdict":"likely-chat|unlikely-chat|uncertain","reason":"short explanation","composerVerdict":"likely-composer|unlikely-composer|uncertain"}. ' +
+        'Return {"verdict":"likely-chat|unlikely-chat|uncertain","bodyVerdict":"clean|mixed-metadata|uncertain","reason":"short explanation","composerVerdict":"likely-composer|unlikely-composer|uncertain"}. ' +
+        'Set bodyVerdict separately from the region verdict. Use mixed-metadata when extracted text includes a sender name, badge or timestamp from the page layout. ' +
         'If no editor image was supplied, omit composerVerdict and discuss only the message list. Use exact verdicts and write the reason in the requested language.';
   }
 }

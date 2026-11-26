@@ -1,6 +1,12 @@
 import type { Candidate } from './detection/candidates';
 import { visibleBounds } from './detection/viewport';
 
+export interface ReviewFeedback {
+  state: 'pending' | 'done' | 'warning' | 'skipped';
+  lines: string[];
+  reason?: string;
+}
+
 const styles = [
   ':host{all:initial}',
   '.panel{position:fixed;right:12px;top:12px;z-index:2147483647;box-sizing:border-box;width:min(342px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:13px;background:#fff;color:#1c2331;border:1px solid #b4c1d7;border-radius:9px;box-shadow:0 4px 18px #0003;font:13px/1.45 system-ui,sans-serif}',
@@ -10,6 +16,7 @@ const styles = [
   '.hover.detected{outline:3px solid #16a34a;outline-offset:-3px;background:rgb(34 197 94 / 16%);box-shadow:inset 0 0 0 4px #fffc}',
   'strong{display:block;font-size:14px}p{margin:7px 0}ul{margin:7px 0;padding-left:19px}li{overflow-wrap:anywhere}',
   '.busy strong::before{content:"";display:inline-block;width:.75em;height:.75em;margin-right:.55em;border:2px solid #cedcf0;border-top-color:#1761df;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(1turn)}}@media (prefers-reduced-motion:reduce){.busy strong::before{animation:none}}',
+  '.review{margin:9px 0;padding:8px 10px;border:1px solid #b4cde9;border-left:3px solid #2d67a4;border-radius:5px;background:#f0f6fd}.review[data-state="warning"]{border-color:#b46c16;background:#fff5e4;color:#593606}.review[data-state="skipped"]{background:#f3f5f7;border-color:#8792a5}.review p{margin:3px 0}.review summary{cursor:pointer;margin-top:5px}.review details p{overflow-wrap:anywhere}',
   'button,input{font:inherit;margin:4px 5px 0 0;padding:4px 7px;border:1px solid #5686c8;border-radius:5px;background:#f2f7ff;color:#192943}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible{outline:2px solid #2164c4}',
 ].join('\n');
 
@@ -19,6 +26,7 @@ export class PagePanel {
   private readonly outline: HTMLElement;
   private readonly panel: HTMLElement;
   private readonly status: HTMLElement;
+  private readonly review: HTMLElement;
   private target?: Element;
   private tracking?: AbortController;
 
@@ -40,6 +48,10 @@ export class PagePanel {
     this.panel.hidden = true;
     this.status = document.createElement('p');
     this.status.setAttribute('role', 'status');
+    this.review = document.createElement('div');
+    this.review.className = 'review';
+    this.review.setAttribute('aria-live', 'polite');
+    this.review.hidden = true;
     this.root.append(style, this.outline, this.panel);
     document.documentElement.append(this.host);
   }
@@ -120,7 +132,9 @@ export class PagePanel {
       this.panel.append(exampleList);
     }
     this.status.textContent = '';
-    this.panel.append(this.status);
+    this.review.hidden = true;
+    this.review.replaceChildren();
+    this.panel.append(this.status, this.review);
   }
 
   showAside(title: string, description: string) {
@@ -157,6 +171,37 @@ export class PagePanel {
 
   note(text: string) {
     this.status.textContent = text;
+  }
+
+  showReview({ state, lines, reason }: ReviewFeedback, expandReason = false, skip?: () => void) {
+    const title = this.document.createElement('strong');
+    const labels = { pending: '正在核验', done: '已完成', warning: '请核对', skipped: '未完成' };
+    title.textContent = '截图核验 · ' + labels[state];
+    this.review.replaceChildren(title);
+    for (const line of lines) {
+      const detail = this.document.createElement('p');
+      detail.textContent = line;
+      this.review.append(detail);
+    }
+    if (reason) {
+      const details = this.document.createElement('details');
+      const summary = this.document.createElement('summary');
+      const explanation = this.document.createElement('p');
+      summary.textContent = '查看模型说明';
+      explanation.textContent = reason;
+      details.open = expandReason;
+      details.append(summary, explanation);
+      this.review.append(details);
+    }
+    if (skip) {
+      const button = this.document.createElement('button');
+      button.type = 'button';
+      button.textContent = '跳过核验';
+      button.addEventListener('click', event => { if (event.isTrusted) skip(); });
+      this.review.append(button);
+    }
+    this.review.dataset.state = state;
+    this.review.hidden = false;
   }
 
   setBusy(busy: boolean) {
