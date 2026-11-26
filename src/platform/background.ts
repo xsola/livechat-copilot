@@ -10,7 +10,7 @@ import { editState, readState, type State } from './store';
 import type { RoomPreference } from './store';
 import { captureCandidate } from './capture';
 import { parseCommand, type PromptContext, type SiteState } from './messages';
-import { effectiveScope, scopeOptions } from './translation-scope';
+import { effectiveScope, scopeOptions, type TranslationScope } from './translation-scope';
 import { alreadyInReadingLanguage } from './reading-language';
 
 type Command = NonNullable<ReturnType<typeof parseCommand>>;
@@ -323,10 +323,15 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
     }
     case 'pageCommand':
       return routePageCommand(cmd.payload.tabId, cmd.payload.action);
-    case 'setPreferredScope':
+    case 'setPreferredScope': {
+      const { tabId, origin, scope } = cmd.payload;
+      if (webUrl((await chrome.tabs.get(tabId)).url).origin !== origin) {
+        throw new Error('页面已切换，请关闭并重新打开工具栏。');
+      }
       return editState(state => ({
-        changes: { settings: { ...state.settings, preferredScope: cmd.payload } }, result: undefined,
+        changes: { preferredScopes: rememberScope(state.preferredScopes, origin, scope) }, result: undefined,
       }));
+    }
     case 'promptContext':
       return promptContext(await promptPage(cmd.payload));
     case 'savePrompt': {
@@ -430,16 +435,17 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
           throw new Error('页面已切换，请关闭并重新打开工具栏。');
         }
         await editState(latest => {
+          const preferredScopes = rememberScope(latest.preferredScopes, origin, scope);
           if (scope === 'site') {
             const enabledSites = latest.enabledSites.filter(site => site !== origin);
             if (enabled) enabledSites.push(origin);
-            return { changes: { enabledSites, revision: latest.revision + 1 }, result: undefined };
+            return { changes: { enabledSites, preferredScopes, revision: latest.revision + 1 }, result: undefined };
           }
           const overrides = { ...latest.scopeOverrides };
           delete overrides[target.key];
           if (enabled !== null || !target.usesPageLink) overrides[target.key] = enabled;
           return { changes: { scopeOverrides: Object.fromEntries(Object.entries(overrides).slice(-500)),
-            revision: latest.revision + 1 }, result: undefined };
+            preferredScopes, revision: latest.revision + 1 }, result: undefined };
         });
         refreshPages();
       }
@@ -448,10 +454,16 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
         origin, youtube: isYouTube(page.hostname) && page.protocol === 'https:',
         translateEmoji: state.settings.translateEmoji, skipReadingLanguage: state.settings.skipReadingLanguage,
         readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()),
-        preferredScope: state.settings.preferredScope,
+        preferredScope: state.preferredScopes[origin] ?? state.settings.preferredScope,
         scopes: await scopeOptions(page, state.enabledSites, state.scopeOverrides),
       } satisfies SiteState;
     }
   }
   throw new Error('Unsupported settings command.');
+}
+
+function rememberScope(prefs: State['preferredScopes'], origin: string, scope: TranslationScope): State['preferredScopes'] {
+  const other = Object.entries(prefs).filter(([site]) => site !== origin);
+  other.push([origin, scope]);
+  return Object.fromEntries(other.slice(-500));
 }

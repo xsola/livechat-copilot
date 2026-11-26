@@ -54,7 +54,7 @@ const payloads = {
   }),
   setTranslateEmoji: z.boolean(),
   setSkipReadingLanguage: z.boolean(),
-  setPreferredScope: scopeType,
+  setPreferredScope: z.object({ tabId: z.number().int().nonnegative(), origin: z.string().max(350), scope: scopeType }),
   promptContext: z.number().int().nonnegative().optional(),
   savePrompt: z.object({
     tabId: z.number().int().nonnegative().optional(),

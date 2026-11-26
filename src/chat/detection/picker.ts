@@ -108,33 +108,34 @@ export class Picker {
     this.preview(candidate, { source });
   }
 
-  start(body = false) {
+  start(body = false, initial?: Candidate) {
     this.endListeners();
     this.searching = false;
     const controller = this.controller = new AbortController();
     const options = { capture: true, signal: controller.signal };
     const document = window.document;
     this.showing = undefined;
-    this.selected = undefined;
-    this.cursor = undefined;
-    this.panel.highlight();
-    this.panel.showAside(body ? '点一条弹幕正文' : '手动选择弹幕区',
-      body ? '在聊天里点击一条消息的文字，插件会从这条消息向外查找弹幕列表。'
-        : '点击包含多条弹幕的列表。↑ 扩大选区，↓ 缩小选区，Esc 退出。');
-    if (!body) this.panel.button('改为点一条弹幕正文', () => this.start(true));
+    this.selected = initial?.container;
+    this.cursor = initial?.messages[0]?.node ?? initial?.container.firstElementChild ?? undefined;
+    this.panel.highlight(this.selected, Boolean(initial));
+    const choose = () => { if (this.selected) this.choose(this.selected, body, Boolean(initial)); };
+    if (initial) {
+      this.panel.showAnchored('调整框选范围', '↑ 扩大一层，↓ 缩小一层。按 Enter 确认，按 Esc 关闭。');
+      this.panel.button('确认调整', choose);
+    } else {
+      this.panel.showAside(body ? '点一条弹幕正文' : '手动选择弹幕区',
+        body ? '在聊天里点击一条消息的文字，插件会从这条消息向外查找弹幕列表。'
+          : '点击包含多条弹幕的列表。↑ 扩大选区，↓ 缩小选区，Esc 退出。');
+      if (!body) this.panel.button('改为点一条弹幕正文', () => this.start(true));
+    }
     this.panel.button('取消', () => this.close());
-    document.addEventListener('mousemove', event => {
-      if (this.panel.contains(event) || !(event.target instanceof Element)) return;
-      if (this.cursor !== event.target) this.selected = this.cursor = event.target;
-      this.panel.highlight(this.selected);
-    }, options);
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); this.close(); return; }
-      if (this.panel.contains(event)) return;
+      if (this.panel.contains(event) && (!initial || event.key === 'Enter')) return;
       if (!this.selected || !['ArrowUp', 'ArrowDown', 'Enter'].includes(event.key)) return;
       event.preventDefault();
       event.stopPropagation();
-      if (event.key === 'Enter') { this.choose(this.selected, body); return; }
+      if (event.key === 'Enter') { choose(); return; }
       if (event.key === 'ArrowUp' && this.selected.parentElement && this.selected.parentElement !== document.documentElement) {
         this.selected = this.selected.parentElement;
       } else if (event.key === 'ArrowDown' && this.cursor) {
@@ -142,10 +143,17 @@ export class Picker {
         while (descendant?.parentElement && descendant.parentElement !== this.selected) descendant = descendant.parentElement;
         if (descendant?.parentElement === this.selected) this.selected = descendant;
       }
-      this.panel.highlight(this.selected);
+      this.panel.highlight(this.selected, Boolean(initial));
+      if (initial) this.panel.note('');
     };
     document.addEventListener('keydown', handleKey, options);
     if (window.top !== window) window.top?.document.addEventListener('keydown', handleKey, options);
+    if (initial) return;
+    document.addEventListener('mousemove', event => {
+      if (this.panel.contains(event) || !(event.target instanceof Element)) return;
+      if (this.cursor !== event.target) this.selected = this.cursor = event.target;
+      this.panel.highlight(this.selected);
+    }, options);
     document.addEventListener('pointerdown', event => {
       if (this.panel.contains(event)) return;
       event.preventDefault();
@@ -159,12 +167,16 @@ export class Picker {
     }, options);
   }
 
-  private choose(node: Element, body: boolean) {
+  private choose(node: Element, body: boolean, adjusted = false) {
     if (!node.isConnected) { this.panel.note('页面已变化，请重新选择。'); return; }
-    this.endListeners();
     const candidate = body ? candidateFromExample(document, node, this.page, this.frame)
-      : candidateFrom(document, node, this.page, this.frame) ?? candidateFromExample(document, node, this.page, this.frame);
+      : candidateFrom(document, node, this.page, this.frame) ?? (adjusted ? undefined : candidateFromExample(document, node, this.page, this.frame));
     if (candidate) { this.preview(candidate); return; }
+    if (adjusted) {
+      this.panel.note('当前框内没有提取到多条弹幕。请按 ↑ 或 ↓ 继续调整。');
+      return;
+    }
+    this.endListeners();
     this.panel.highlight();
     this.panel.show('暂时无法用这个选区提取弹幕', '请点聊天消息中的文字，或手动选中包含多条消息的列表。');
     this.panel.button('点一条弹幕正文', () => this.start(true));
@@ -190,9 +202,18 @@ export class Picker {
     const sources: Record<string, string> = { builtin: '内置规则', local: '你保存的规则', community: '社区规则', 'same-site': '同站直播间已保存的规则' };
     const { source, located } = automatic ?? {};
     if (automatic) {
-      this.panel.showAside('已识别弹幕区', source
+      this.panel.showAnchored('已识别弹幕区', source
         ? '绿框标出弹幕区。当前使用' + (sources[source] ?? source) + '。' + controls
         : '请核对绿框位置。框住弹幕区就可以保存。' + controls);
+      this.panel.button('调整框选范围', () => this.start(false, candidate));
+      const { signal } = this.controller = new AbortController();
+      const dismiss = (event: KeyboardEvent) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        this.close();
+      };
+      document.addEventListener('keydown', dismiss, { capture: true, signal });
+      if (window.top !== window) window.top?.document.addEventListener('keydown', dismiss, { capture: true, signal });
     } else {
       this.panel.show('核对弹幕样本', '下面是从候选区读到的消息。样本正确就可保存。' + controls, candidate);
     }

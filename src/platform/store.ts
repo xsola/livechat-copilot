@@ -3,6 +3,7 @@ import type { ChatRule } from '../rules/schema';
 import type { CommunityRules } from '../rules/resolver';
 import type { DailyUsage } from '../usage/usage';
 import type { PromptOverrides } from '../models/prompts';
+import type { TranslationScope } from './translation-scope';
 
 export interface RoomPreference {
   language: string | null;
@@ -13,6 +14,7 @@ export interface State {
   settings: Settings;
   revision: number;
   enabledSites: string[];
+  preferredScopes: Record<string, TranslationScope>;
   scopeOverrides: Record<string, boolean | null>;
   localRules: ChatRule[];
   community: CommunityRules;
@@ -26,6 +28,7 @@ const initial: State = {
   settings: defaults,
   revision: 0,
   enabledSites: [],
+  preferredScopes: {},
   scopeOverrides: {},
   localRules: [],
   community: { active: [], staged: [], rejected: {} },

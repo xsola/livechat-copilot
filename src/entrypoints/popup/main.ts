@@ -91,7 +91,7 @@ void run(async () => {
 
 scope.addEventListener('change', () => {
   showScope();
-  void run(() => send('setPreferredScope', scope.value as TranslationScope));
+  void run(() => send('setPreferredScope', { tabId, origin: site.origin, scope: scope.value as TranslationScope }));
 });
 
 function setScope(checked: boolean | null) {
