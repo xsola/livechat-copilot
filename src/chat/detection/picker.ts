@@ -95,6 +95,10 @@ export class Picker {
   async locate(candidates: Candidate[], unresolved?: Element) {
     const attempt = this.searchEpoch;
     const settings = this.settings();
+    if (!candidates.length) {
+      this.noCandidate(undefined, unresolved, { state: 'skipped', lines: ['本地还没有找到可核验的候选，没有发送 HTML 或截图。'] });
+      return;
+    }
     if (!settings?.imageInput || !settings.autoVision || !settings.modelConfigured) {
       this.noCandidate(undefined, unresolved);
       return;
@@ -182,7 +186,7 @@ export class Picker {
       this.panel.showAnchored('调整框选范围', '↑ 扩大可见区域，↓ 缩小可见区域。按 Enter 确认，按 Esc 关闭。');
       this.panel.button('确认调整', choose);
     } else {
-      this.panel.showAside(body ? '点一条弹幕正文' : '手动选择弹幕区',
+      this.panel.showPicker(body ? '点一条弹幕正文' : '手动选择弹幕区',
         body ? '绿框标出指针下的区域。点击一条弹幕的文字，插件会据此查找弹幕列表。'
           : '移动指针预览绿框，点击包含多条弹幕的列表。↑ 扩大选区，↓ 缩小选区，Esc 退出。');
       if (!body) this.panel.button('改为点一条弹幕正文', () => this.start(true));
@@ -238,9 +242,10 @@ export class Picker {
 
   private choose(node: Element, body: boolean, adjusted = false) {
     if (!node.isConnected) { this.panel.note('页面已变化，请重新选择。'); return; }
-    const candidate = body ? candidateFromExample(document, node, this.page, this.frame)
-      : candidateFrom(document, node, this.page, this.frame) ?? (adjusted ? undefined : candidateFromExample(document, node, this.page, this.frame));
-    if (candidate) { this.preview(candidate, undefined, adjusted); return; }
+    const direct = body ? undefined : candidateFrom(document, node, this.page, this.frame);
+    const example = !direct && !adjusted ? candidateFromExample(document, node, this.page, this.frame) : undefined;
+    const candidate = direct ?? example;
+    if (candidate) { this.preview(candidate, undefined, adjusted, example ? node : undefined); return; }
     if (adjusted) {
       this.panel.note('当前框内没有提取到多条弹幕。请按 ↑ 或 ↓ 继续调整。');
       return;
@@ -254,7 +259,8 @@ export class Picker {
     this.dismissOnEscape();
   }
 
-  private preview(candidate: Candidate, automatic?: { source?: string; located?: ReviewFeedback; excludeComposer?: boolean; localOnly?: boolean }, adjusted = false) {
+  private preview(candidate: Candidate, automatic?: { source?: string; located?: ReviewFeedback; excludeComposer?: boolean; localOnly?: boolean },
+    adjusted = false, example?: Element) {
     this.endListeners();
     this.searching = false;
     candidate = {
@@ -278,7 +284,10 @@ export class Picker {
     } else if (adjusted) {
       this.panel.showAnchored('核对弹幕样本', '下面是从调整后的绿框内读到的消息。' + controls, candidate);
     } else {
-      this.panel.showAnchored('核对弹幕样本', '绿框标出插件读取的列表。下面是从中提取的消息。样本正确就可保存。' + controls, candidate);
+      this.panel.showAnchored('核对弹幕样本', (example
+        ? '蓝框标出你点选的正文样例，绿框标出用于读取新消息的列表。下方显示提取结果。'
+        : '绿框标出插件读取的列表。下面是从中提取的消息。样本正确就可保存。') + controls, candidate);
+      if (example) this.panel.highlightSample(example);
     }
     if (automatic || adjusted) {
       this.panel.button('调整框选范围', () => this.start(false, candidate));

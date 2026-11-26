@@ -10,24 +10,37 @@ export interface ReviewFeedback {
 const styles = [
   ':host{all:initial}',
   '.panel{position:fixed;right:12px;top:12px;z-index:2147483647;box-sizing:border-box;width:min(342px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:13px;background:#fff;color:#1c2331;border:1px solid #b4c1d7;border-radius:9px;box-shadow:0 4px 18px #0003;font:13px/1.45 system-ui,sans-serif}',
-  '.panel.bottom-left{left:12px;right:auto;top:auto;bottom:12px}',
+  '.panel.picking{left:50%;right:auto;top:16px;transform:translateX(-50%);border-top:3px solid #16a34a}',
   '.panel.anchored{right:auto;bottom:auto}',
-  '.hover{position:fixed;pointer-events:none;z-index:2147483646;outline:2px solid #1761df;background:#3187ff26;box-sizing:border-box}',
+  '.hover,.sample-outline{position:fixed;pointer-events:none;z-index:2147483646;outline:2px solid #1761df;background:#3187ff26;box-sizing:border-box}',
   '.hover.detected{outline:3px solid #16a34a;outline-offset:-3px;background:rgb(34 197 94 / 16%);box-shadow:inset 0 0 0 4px #fffc}',
+  '.sample-outline{outline-offset:-1px;background:rgb(49 135 255 / 12%)}',
   'strong{display:block;font-size:14px}p{margin:7px 0}ul{margin:7px 0;padding-left:19px}li{overflow-wrap:anywhere}',
   '.busy strong::before{content:"";display:inline-block;width:.75em;height:.75em;margin-right:.55em;border:2px solid #cedcf0;border-top-color:#1761df;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(1turn)}}@media (prefers-reduced-motion:reduce){.busy strong::before{animation:none}}',
   '.review{margin:9px 0;padding:8px 10px;border:1px solid #b4cde9;border-left:3px solid #2d67a4;border-radius:5px;background:#f0f6fd}.review[data-state="warning"]{border-color:#b46c16;background:#fff5e4;color:#593606}.review[data-state="skipped"]{background:#f3f5f7;border-color:#8792a5}.review p{margin:3px 0}.review summary{cursor:pointer;margin-top:5px}.review details p{overflow-wrap:anywhere}',
   'button,input{font:inherit;margin:4px 5px 0 0;padding:4px 7px;border:1px solid #5686c8;border-radius:5px;background:#f2f7ff;color:#192943}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible{outline:2px solid #2164c4}',
 ].join('\n');
 
+function outlineAt(outline: HTMLElement, target?: Element) {
+  const bounds = target?.isConnected ? visibleBounds(target) : new DOMRect();
+  const { left, top, width, height } = bounds;
+  outline.hidden = width <= 0 || height <= 0;
+  if (!outline.hidden) Object.assign(outline.style, {
+    left: left + 'px', top: top + 'px', width: width + 'px', height: height + 'px',
+  });
+  return bounds;
+}
+
 export class PagePanel {
   readonly host: HTMLElement;
   private readonly root: ShadowRoot;
   private readonly outline: HTMLElement;
+  private readonly sampleOutline: HTMLElement;
   private readonly panel: HTMLElement;
   private readonly status: HTMLElement;
   private readonly review: HTMLElement;
   private target?: Element;
+  private sample?: Element;
   private tracking?: AbortController;
 
   constructor(private readonly document: Document) {
@@ -41,6 +54,10 @@ export class PagePanel {
     this.outline.className = 'hover';
     this.outline.setAttribute('aria-hidden', 'true');
     this.outline.hidden = true;
+    this.sampleOutline = document.createElement('div');
+    this.sampleOutline.className = 'sample-outline';
+    this.sampleOutline.setAttribute('aria-hidden', 'true');
+    this.sampleOutline.hidden = true;
     this.panel = document.createElement('div');
     this.panel.className = 'panel';
     this.panel.setAttribute('role', 'region');
@@ -52,7 +69,7 @@ export class PagePanel {
     this.review.className = 'review';
     this.review.setAttribute('aria-live', 'polite');
     this.review.hidden = true;
-    this.root.append(style, this.outline, this.panel);
+    this.root.append(style, this.outline, this.sampleOutline, this.panel);
     document.documentElement.append(this.host);
   }
 
@@ -83,11 +100,8 @@ export class PagePanel {
 
   private position() {
     const { innerWidth, innerHeight } = this.document.defaultView!;
-    const { left, top, right, bottom } = this.target?.isConnected ? visibleBounds(this.target) : new DOMRect();
-    this.outline.hidden = right <= left || bottom <= top;
-    if (!this.outline.hidden) Object.assign(this.outline.style, {
-      left: left + 'px', top: top + 'px', width: right - left + 'px', height: bottom - top + 'px',
-    });
+    const { left, top, right, bottom } = outlineAt(this.outline, this.target);
+    outlineAt(this.sampleOutline, this.sample);
     if (this.panel.hidden || !this.panel.classList.contains('anchored')) return;
 
     const gap = 12;
@@ -113,7 +127,8 @@ export class PagePanel {
   }
 
   show(title: string, description: string, candidate?: Candidate) {
-    this.panel.classList.remove('bottom-left', 'anchored', 'busy');
+    this.panel.classList.remove('picking', 'anchored', 'busy');
+    this.highlightSample();
     this.panel.style.removeProperty('left');
     this.panel.style.removeProperty('top');
     this.panel.hidden = false;
@@ -137,9 +152,14 @@ export class PagePanel {
     this.panel.append(this.status, this.review);
   }
 
-  showAside(title: string, description: string) {
+  showPicker(title: string, description: string) {
     this.show(title, description);
-    this.panel.classList.add('bottom-left');
+    this.panel.classList.add('picking');
+  }
+
+  highlightSample(node?: Element) {
+    this.sample = node;
+    outlineAt(this.sampleOutline, node);
   }
 
   showAnchored(title: string, description: string, candidate?: Candidate) {
@@ -211,10 +231,12 @@ export class PagePanel {
   captureVisibility(visible: boolean) {
     this.panel.style.visibility = visible ? '' : 'hidden';
     this.outline.style.visibility = visible ? '' : 'hidden';
+    this.sampleOutline.style.visibility = visible ? '' : 'hidden';
   }
 
   hide() {
     this.panel.hidden = true;
+    this.highlightSample();
     this.highlight();
   }
 }

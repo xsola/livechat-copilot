@@ -2,7 +2,7 @@
 
 <h1 align="center">LiveChat Copilot</h1>
 
-Chrome 直播弹幕翻译扩展，内置 YouTube、Twitch 和 Bilibili 直播的文字弹幕规则。其他网站可以从工具栏启动自动识别，或在页面里点一条弹幕正文、手动选择整个列表。核对选区后即可保存为本地规则。
+Chrome 直播弹幕翻译扩展，内置 YouTube、Twitch、Bilibili 和斗鱼直播的文字弹幕规则。其他网站可以从工具栏启动自动识别，或在页面里点一条弹幕正文、手动选择整个列表。核对选区后即可保存为本地规则。
 
 ## 当前功能
 

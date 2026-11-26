@@ -1,11 +1,12 @@
 import type { ChatRule } from '../rules/schema';
+import { douyuAuthor } from './douyu';
 
 export interface DOMMessage { node: Element; body: Element; text: string; withoutEmoji: string }
 export const authorSelectors = ['[rel="author"]', '[data-role="author"]', '.author', '.author-name', '.chat-author',
-  '.username', '[data-testid="username"]', '#author-name', '.user-name', '.common-nickname-wrapper'];
+  '.username', '[data-testid="username"]', '#author-name', '.user-name', '.common-nickname-wrapper', douyuAuthor];
 export const messageAuthor = authorSelectors.join(', ');
 export const messageMetadata = messageAuthor + ', .danmaku-item-left, .fans-medal-item, .user-level-icon, .title-label, ' +
-  '.chat-badge, .message-badges, [data-role="badge"], time, [data-role="timestamp"]';
+  '.chat-badge, .message-badges, .Barrage-nickName.is-colon, [data-role="badge"], time, [data-role="timestamp"]';
 const mention = '[data-mention], [data-role="mention"], .mention, .chat-mention';
 export interface RuleTest { container: Element; messages: DOMMessage[]; rejected: boolean }
 

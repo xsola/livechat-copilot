@@ -1,5 +1,6 @@
 import type { ChatRule } from './schema';
 import { bilibiliBody, bilibiliHost, bilibiliRow } from '../chat/bilibili';
+import { douyuAuthor, douyuBody, douyuHosts, douyuRow } from '../chat/douyu';
 
 const youtube: ChatRule[] = ['www.youtube.com', 'youtube.com'].map((host, index) => ({
   schemaVersion: 1,
@@ -32,4 +33,11 @@ const bilibili: ChatRule = {
   body: bilibiliBody,
 };
 
-export const builtins = [...youtube, ...twitch, bilibili];
+const douyu: ChatRule[] = douyuHosts.map((host, index) => ({
+  schemaVersion: 1, id: index ? 'douyu-live-root' : 'douyu-live', version: 1, host,
+  container: '.Barrage-list:has(.Barrage-listItem ' + douyuAuthor + '):has(.Barrage-listItem ' + douyuBody + ')',
+  message: douyuRow,
+  body: douyuBody,
+}));
+
+export const builtins = [...youtube, ...twitch, bilibili, ...douyu];

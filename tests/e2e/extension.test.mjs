@@ -384,6 +384,7 @@ test('Twitch finds nested chat, keeps the chosen scope, and leaves no picker on 
   await live.locator('[data-lcc-kind="panel"] .panel.busy').waitFor();
   await live.getByText('正在等待新弹幕，确认哪个区域持续更新…', { exact: true }).waitFor();
   await live.getByText('未找到弹幕区', { exact: true }).waitFor();
+  await live.getByText('本地还没有找到可核验的候选，没有发送 HTML 或截图。', { exact: true }).waitFor();
   assert.equal(await live.getByRole('button', { name: '点一条弹幕正文' }).count(), 0);
   await openPopup();
   assert.equal(await popup.locator('#scope').inputValue(), 'room');
@@ -527,6 +528,43 @@ test('Bilibili isolates the chat list and body and skips parents that shrink the
   await panel.getByText('这局打得很精彩', { exact: true }).waitFor();
   await panel.getByRole('button', { name: '保存并启用规则' }).click();
   await panel.waitFor({ state: 'hidden' });
+});
+
+test('Douyu identifies sparse chat and shows the selected sample independently of its list', { timeout: 35_000 }, async t => {
+  const { context, options, requestLog } = await boot(t);
+  const url = 'https://www.douyu.com/12345';
+  const row = (name, text) => `<li class="Barrage-listItem"><span class="chat-row-inner">
+    <span class="chat-badge">Synthetic badge</span><span class="Barrage-nickName js-nick">${name}</span>
+    <span class="Barrage-nickName is-colon">：</span><span class="Barrage-content">${text}</span></span></li>`;
+  await context.route(url, route => route.fulfill({ contentType: 'text/html', body: `<ul class="Barrage-list">
+    <li class="Barrage-listItem"><span class="Barrage-content">System banner</span></li></ul>
+    <aside style="width:350px;margin:180px 0 0 auto">
+    <ul id="active-chat" class="Barrage-list" style="height:200px;overflow:auto;padding-left:8px">${row('OpaqueUser123', 'Good first round')}
+    <li class="Barrage-listItem"><span class="Barrage-line"><span class="Barrage-content">System banner</span></span></li></ul></aside>` }));
+  await options.evaluate(() => chrome.storage.local.set({ localRules: [{ schemaVersion: 1, id: 'old-douyu', version: 1,
+    host: 'www.douyu.com', pathPrefix: '/12345', container: '.Barrage-list', message: '.Barrage-listItem', body: '.chat-row-inner' }] }));
+  const live = await context.newPage();
+  await live.goto(url);
+  const tab = await tabId(options, url);
+  await command(options, 'attach', tab);
+  await command(options, 'setSite', { tabId: tab, enabled: true, origin: new URL(url).origin });
+  await action(options, tab, 'detect');
+  const panel = live.getByRole('region', { name: 'LiveChat Copilot' });
+  await panel.getByText(/内置规则/).waitFor();
+  await live.getByText('译：Good first round', { exact: true }).waitFor();
+  const chatList = live.locator('#active-chat');
+  await chatList.evaluate((list, html) => list.insertAdjacentHTML('beforeend', html), row('OpaqueUser456', 'Ready for the next round'));
+  await live.getByText('译：Ready for the next round', { exact: true }).waitFor();
+  assert.ok(requestLog.every(request => !/OpaqueUser|Synthetic badge|System banner/.test(JSON.stringify(request))));
+  await action(options, tab, 'pick');
+  await panel.getByText('手动选择弹幕区', { exact: true }).waitFor();
+  const box = await panel.boundingBox();
+  assert.ok(box.y < 40 && Math.abs(box.x + box.width / 2 - (await live.evaluate(() => innerWidth)) / 2) < 2);
+  const sample = chatList.getByText('Good first round', { exact: true });
+  await sample.click();
+  await panel.getByText(/蓝框标出你点选的正文样例/).waitFor();
+  assert.deepEqual(await live.locator('[data-lcc-kind="panel"] .sample-outline').boundingBox(), await sample.boundingBox());
+  assert.deepEqual(await live.locator('[data-lcc-kind="panel"] .hover.detected').boundingBox(), await chatList.boundingBox());
 });
 
 test('generic rules isolate nested lists and extract marked or inline bodies without metadata', { timeout: 45_000 }, async t => {

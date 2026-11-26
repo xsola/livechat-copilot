@@ -1,5 +1,6 @@
 import { authorSelectors, matches, messageAuthor, messageMetadata, messageTail, query, queryAll, selectorPath, stableSelector, testRule, type RuleTest } from '../dom';
 import { bilibiliBody, bilibiliRow } from '../bilibili';
+import { douyuBody, douyuHosts, douyuRow } from '../douyu';
 import type { ChatRule } from '../../rules/schema';
 import { isYouTube } from '../../platform/config';
 
@@ -13,7 +14,7 @@ export interface Candidate extends RuleTest {
 const chatNames = /chat|comment|message|danmaku/i;
 const editorNames = /chat|comment|message|danmaku|弹幕|彈幕|聊天|发言|發言|コメント|チャット|채팅/i;
 const messageBodies = [
-  bilibiliBody, '#message', '[data-message-body]', '[data-testid*="message-text"]', '[data-testid*="message-content"]',
+  bilibiliBody, douyuBody, '#message', '[data-message-body]', '[data-testid*="message-text"]', '[data-testid*="message-content"]',
   '[data-a-target="chat-line-message-body"]', '[data-test-selector="chat-line-message-body"]', '.chat-line__message--message',
   '[data-role="message-body"]', '.message-body', '.message-content', '.message-text', '.chat-text', '.comment-text', '.body', '.text',
 ];
@@ -78,7 +79,9 @@ export function candidateFrom(
   if (region.closest(excluded) || query(region, 'video, [data-a-target="video-player"]')) return;
   const container = selectorPath(document, region);
   if (!container || container.length > 500) return;
-  const semanticRows = queryAll(region, rowSelector + ':not(' + rowSelector + ' *)');
+  const rowsSelector = douyuHosts.includes(page.hostname) ? douyuRow : rowSelector;
+  const topRows = rowsSelector + ':not(' + rowsSelector + ' *)';
+  const semanticRows = queryAll(region, topRows);
   const useSemantic = semanticRows.length >= 2 && (!example || semanticRows.some(row => row.contains(example)));
   const children = (useSemantic ? semanticRows : Array.from(region.children)).slice(-40)
     .filter(child => !matches(child, excluded));
@@ -110,7 +113,7 @@ export function candidateFrom(
   const rule: ChatRule = {
     schemaVersion: 1, id: 'candidate', version: 1, host: page.hostname,
     pathPrefix: pathPrefix.slice(0, 250), framePathPrefix,
-    container, message: useSemantic ? rowSelector + ':not(' + rowSelector + ' *)' : ':scope > ' + shape, body, bodyAfter,
+    container, message: useSemantic ? topRows : ':scope > ' + shape, body, bodyAfter,
   };
   const preview = testRule(document, rule, region);
   if (!preview || preview.messages.length < 2 || preview.rejected) return;
@@ -189,7 +192,7 @@ export function composerElements(candidate: Candidate) {
 
 export function candidateFromExample(document: Document, example: Element, page: URL, frame: URL) {
   if (example.closest(excluded)) return;
-  const row = example.closest(messageRow);
+  const row = example.closest(douyuHosts.includes(page.hostname) ? douyuRow : messageRow);
   const body = example.closest(messageBodies.join(', '));
   const firstAncestor = row ? row.parentElement : body ? body.parentElement?.parentElement : example.parentElement;
   for (let ancestor = firstAncestor, depth = 0; ancestor && ancestor !== document.body && depth < 12;

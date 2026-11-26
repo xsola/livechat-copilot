@@ -1,5 +1,6 @@
 import { builtins } from './builtin';
 import { bilibiliBody, bilibiliHost } from '../chat/bilibili';
+import { douyuBody, douyuHosts } from '../chat/douyu';
 import { ruleMatches, type ChatRule, type RuleMatch } from './schema';
 
 export interface CommunityRules {
@@ -25,8 +26,9 @@ export function resolveRules(page: URL, frame: URL, local: ChatRule[], community
     ...matching(community.active).map(rule => ({ rule, source: 'community' as const })),
     ...matching(builtins).map(rule => ({ rule, source: 'builtin' as const })),
   ];
-  if (page.hostname !== bilibiliHost) return ordered;
-  const loose = (match: RuleMatch) => match.source === 'local' && match.rule.body !== bilibiliBody;
+  const nativeBody = page.hostname === bilibiliHost ? bilibiliBody : douyuHosts.includes(page.hostname) ? douyuBody : undefined;
+  if (!nativeBody) return ordered;
+  const loose = (match: RuleMatch) => match.source === 'local' && match.rule.body !== nativeBody;
   return [...ordered.filter(match => !loose(match)), ...ordered.filter(loose)];
 }
 
