@@ -1,6 +1,6 @@
 import { createTasks } from '../models/tasks';
 import { ImageInputUnsupportedError } from '../models/openai-compatible';
-import { modelSystemPrompt, promptDefaults, promptTasks, taskInstructions } from '../models/prompts';
+import { modelSystemPrompt, promptTasks, taskInstruction, taskInstructions } from '../models/prompts';
 import { resolveRules, decideRule } from '../rules/resolver';
 import { summarizeRules, syncRegistry } from '../rules/registry';
 import { ruleMatches } from '../rules/schema';
@@ -84,15 +84,20 @@ async function promptPage(tabId?: number) {
 }
 
 async function promptContext(page: Awaited<ReturnType<typeof promptPage>>): Promise<PromptContext> {
-  const settings = pageSettings(await readState(), page.origin);
+  const settings = modelLanguages(pageSettings(await readState(), page.origin));
   const prompts = Object.fromEntries(promptTasks.map(task => {
-    const instruction = settings.systemPrompts[task] ?? promptDefaults[task];
-    return [task, { instruction, system: modelSystemPrompt(taskInstructions(task, settings, instruction)) }];
+    const instruction = taskInstruction(task, settings);
+    return [task, { instruction, system: modelSystemPrompt(taskInstructions(task, settings, instruction), settings.uiLanguage) }];
   })) as PromptContext['prompts'];
   return {
     ...page, prompts, model: settings.model.model,
-    readingLanguage: readingLanguage(settings.readingLanguage, chrome.i18n.getUILanguage()),
+    readingLanguage: settings.readingLanguage,
   };
+}
+
+function modelLanguages(settings: Settings) {
+  const uiLanguage = readingLanguage('', chrome.i18n.getUILanguage());
+  return { ...settings, uiLanguage, readingLanguage: readingLanguage(settings.readingLanguage, uiLanguage) };
 }
 
 function imageUnavailable(state: State) {
@@ -104,7 +109,7 @@ async function authorizedModel(settings: Settings) {
   if (!await chrome.permissions.contains({ origins: [hostPattern(url)] })) {
     throw new Error('Grant access to your model endpoint in Settings.');
   }
-  return { ...settings, readingLanguage: readingLanguage(settings.readingLanguage, chrome.i18n.getUILanguage()) };
+  return modelLanguages(settings);
 }
 
 function refreshPages() {

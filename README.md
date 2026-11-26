@@ -57,7 +57,7 @@ npm run build
 
 ## 开发和验证
 
-工具栏使用 Chrome 的本地化资源。简体中文由 `public/_locales/zh_CN/messages.json` 提供，英语由 `public/_locales/en/messages.json` 提供并作为其他地区的回退。设置页和网页内提示尚未迁移到语言包。界面语言和翻译目标分别生效。
+工具栏使用 Chrome 的本地化资源。简体中文由 `public/_locales/zh_CN/messages.json` 提供，英语由 `public/_locales/en/messages.json` 提供并作为其他地区的回退。设置页和网页内提示尚未整体迁移到语言包。内置模型提示词随浏览器语言在中文和英文之间切换，已有自定义提示词按原文使用。模型的截图核验说明按浏览器语言请求，弹幕译文按独立设置的目标语言生成。
 
 ```sh
 npm run typecheck

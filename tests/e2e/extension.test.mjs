@@ -38,7 +38,8 @@ async function boot(t, locale = 'zh-CN') {
       useComposer: true, bodyVerdict: 'clean', reason: 'Image matches the sample rows.',
     }
       : command.test === 'image-capability' ? { color: 'blue' }
-      : Array.isArray(content) ? { verdict: 'likely-chat', reason: 'Synthetic region confirmed.',
+      : Array.isArray(content) ? { verdict: 'likely-chat',
+        reason: value.model === 'test-review-mixed' && command.language.startsWith('zh') ? '测试：已确认是弹幕列表。' : 'Synthetic region confirmed.',
         bodyVerdict: value.model === 'test-review-mixed' ? 'mixed-metadata' : 'clean',
         composerVerdict: command.sample.editorImage ? 'likely-composer' : 'unlikely-composer' }
       : items.length ? { translations: items.map(({ id, text }) => ({ id, text: '译：' + text })) }
@@ -185,7 +186,9 @@ test('YouTube restricted input is recognized without inferring a send-area misma
 });
 
 test('automatic review shows a body warning separately from a successful region match', { timeout: 35_000 }, async t => {
-  const { context, options } = await boot(t);
+  const { context, options, requestLog } = await boot(t);
+  const { browserLanguage, settings } = await command(options, 'getSettings');
+  await command(options, 'saveReadingSettings', { readingLanguage: 'ja', mode: settings.mode, prompt: settings.prompt });
   await options.locator('#model').fill('test-review-mixed');
   await options.getByRole('button', { name: '测试当前模型' }).click();
   await options.getByText('支持', { exact: true }).waitFor();
@@ -196,13 +199,20 @@ test('automatic review shows a body warning separately from a successful region 
   await live.goto('https://www.youtube.com/watch?v=review');
   await live.bringToFront();
   const tab = await tabId(options, live.url());
+  await command(options, 'setSite', { tabId: tab, enabled: true, origin: 'https://www.youtube.com' });
+  await live.frameLocator('#chatframe').getByText('译：Amazing comeback', { exact: true }).waitFor();
   await action(options, tab, 'detect');
   const panel = live.frameLocator('#chatframe').getByRole('region', { name: 'LiveChat Copilot' });
   await panel.getByText('截图核验 · 正在核验', { exact: true }).waitFor();
   await panel.getByText('截图核验 · 请核对', { exact: true }).waitFor();
   await panel.getByText('可能是弹幕区', { exact: true }).waitFor();
   await panel.getByText('正文可能混入昵称、徽章或时间戳，请重新核对。', { exact: true }).waitFor();
-  const explanation = panel.getByText('Synthetic region confirmed.', { exact: true });
+  const review = requestLog.find(({ messages }) => Array.isArray(messages[1].content) && JSON.parse(messages[1].content[0].text).sample);
+  assert.equal(JSON.parse(review.messages[1].content[0].text).language, browserLanguage);
+  assert.match(review.messages[0].content, /分别判断区域和正文/);
+  assert.ok(requestLog.some(({ messages }) => typeof messages[1].content === 'string' &&
+    JSON.parse(messages[1].content).targetLanguage === 'ja' && messages[1].content.includes('Amazing comeback')));
+  const explanation = panel.getByText('测试：已确认是弹幕列表。', { exact: true });
   assert.equal(await explanation.isVisible(), false);
   await panel.getByText('查看模型说明', { exact: true }).click();
   await explanation.waitFor();
@@ -740,7 +750,9 @@ test('advanced prompts show the real system message and apply a website override
   await options.getByText('当前网站 https://www.youtube.com', { exact: false }).waitFor();
   const instructions = options.locator('#system-instruction');
   assert.equal(await instructions.getAttribute('readonly'), '');
+  assert.match(await instructions.inputValue(), /把每条弹幕翻译成/);
   assert.match(await options.locator('#system-preview').inputValue(), /targetLanguage/);
+  assert.match(await options.locator('#system-preview').inputValue(), /用词自然、简洁/);
   await options.getByRole('button', { name: '解锁编辑' }).click();
   await instructions.fill('Use the custom website terminology.');
   await options.getByRole('button', { name: '保存任务指令' }).click();

@@ -1,7 +1,7 @@
 import '../../platform/ui.css';
-import { defaultPrompt, hostPattern, isTextOnlyModel, languageCode, modelConfig, parseEndpoint, type ModelConfig, type Settings } from '../../platform/config';
+import { hostPattern, isTextOnlyModel, languageCode, modelConfig, parseEndpoint, type ModelConfig, type Settings } from '../../platform/config';
 import { send, type PromptContext, type RuleSummary } from '../../platform/messages';
-import type { PromptTask } from '../../models/prompts';
+import { followsDefaultWording, wordingPreference, type PromptTask } from '../../models/prompts';
 import type { DailyUsage, ModelTask, PageCounter, TaskUsage } from '../../usage/usage';
 
 const field = (id: string) => document.querySelector<HTMLInputElement>('#' + id)!;
@@ -142,7 +142,8 @@ void run(status, async () => {
   field('language').value = settings.readingLanguage;
   field('language').placeholder = locale;
   field('mode').value = settings.mode;
-  field('prompt').value = settings.prompt;
+  field('prompt').value = followsDefaultWording(settings.prompt) ? '' : settings.prompt;
+  field('prompt').placeholder = wordingPreference('', browserLanguage);
   rememberCapability(settings.model, imageUnavailable);
   updateReadingHelp();
   showRules(rules);
@@ -270,7 +271,7 @@ document.querySelector<HTMLFormElement>('#settings')!.addEventListener('submit',
   });
 });
 
-element('reset-prompt').addEventListener('click', () => { field('prompt').value = defaultPrompt; });
+element('reset-prompt').addEventListener('click', () => { field('prompt').value = ''; });
 const testButton = document.querySelector<HTMLButtonElement>('#test')!;
 testButton.addEventListener('click', () => {
   testButton.disabled = true;

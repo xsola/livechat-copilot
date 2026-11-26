@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { promptOverrides } from '../models/prompts';
 
-export const defaultPrompt = 'Use natural, concise wording. Preserve game terms, links, emojis and placeholders. Do not add explanations.';
 export const languageCode = z.string().regex(/^[a-z]{2,8}(?:-[a-z0-9]{2,8})*$/i).max(48);
 export const modelConfig = z.strictObject({
   endpoint: z.string().max(500),
@@ -42,7 +41,7 @@ export const defaults: Settings = {
   },
   readingLanguage: '',
   mode: 'batch',
-  prompt: defaultPrompt,
+  prompt: '',
   registryUrl: '',
   autoVision: false,
   translateEmoji: false,

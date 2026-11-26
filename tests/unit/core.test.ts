@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { alignTranslations, createTasks } from '../../src/models/tasks';
+import { taskInstructions, wordingPreference } from '../../src/models/prompts';
 import { generateDraft } from '../../src/agent/tasks/draft';
 import { defaults, parseEndpoint, parseRegistry, readingLanguage } from '../../src/platform/config';
 import { normalizeLanguage } from '../../src/rooms/language-input';
@@ -23,6 +24,14 @@ test('reading language follows Chrome unless the user overrides it', () => {
   assert.equal(readingLanguage('', 'pt_BR'), 'pt-BR');
   assert.equal(readingLanguage('ja', 'pt-BR'), 'ja');
   assert.equal(readingLanguage('', ''), 'en');
+});
+
+test('prompt templates follow the interface locale while preserving custom instructions', () => {
+  const prefs = { ...defaults, readingLanguage: 'ja', uiLanguage: 'zh-CN' };
+  assert.match(taskInstructions('translation', prefs), /把每条弹幕翻译成 targetLanguage/);
+  assert.match(taskInstructions('translation', { ...prefs, uiLanguage: 'fr-FR' }), /Translate each item into targetLanguage/);
+  assert.match(taskInstructions('translation', { ...prefs, systemPrompts: { translation: 'Keep proper names' } }), /^Keep proper names/);
+  assert.equal(wordingPreference('Use polite Korean', 'zh-CN'), 'Use polite Korean');
 });
 
 test('room language accepts native names and common aliases', () => {
