@@ -100,14 +100,16 @@ export function createTasks(meter: Meter, request = fetch) {
         taskInstructions('vision', settings, settings.systemPrompts.vision ?? promptDefaults.vision),
         { language: settings.readingLanguage, sample }, result => requireResult(visionOutput, result), 250, image);
     },
-    locateChat(settings: Settings, image: string, candidates: ReadonlyArray<{ id: string; html: string; samples: string[] }>) {
+    locateChat(settings: Settings, image: string, candidates: ReadonlyArray<{ id: string; html: string; samples: string[]; editorImage: boolean }>) {
       return call('vision', settings,
-        'Find the live chat message list. The screenshot contains candidate crops in the given order, stacked from top to bottom. ' +
+        'Find the live chat message list and its chat input if visible. The screenshot contains candidate crops in the given order, stacked from top to bottom. ' +
+        'For each ID, the chat crop is first, followed by a crop of its candidate editor only when editorImage is true. ' +
         'Match the repeated rows visible in the image to the candidate HTML and message samples. Ignore player buttons, stream labels, ' +
-        'static comments and unrelated lists. Pick only an ID from candidates. Return {"candidateId":"id","reason":"short explanation"}. ' +
-        'Use null when the live chat is not shown. Explain briefly in the requested language.',
+        'static comments and unrelated lists. Pick only an ID from candidates. Return {"candidateId":"id","useComposer":true,"reason":"short explanation"}. ' +
+        'Set useComposer to false when the proposed editor is visible but is not the chat input. Omit useComposer when no editor crop was provided. ' +
+        'Use a null candidateId when the live chat is not shown. Explain briefly in the requested language.',
         { candidates, language: settings.readingLanguage }, value => {
-          const result = requireResult(z.object({ candidateId: z.string().nullable(), reason: z.string().max(400) }), value);
+          const result = requireResult(z.object({ candidateId: z.string().nullable(), useComposer: z.boolean().optional(), reason: z.string().max(400) }), value);
           if (result.candidateId && !candidates.some(candidate => candidate.id === result.candidateId)) {
             throw new ModelError('模型返回了未知弹幕区域。');
           }

@@ -16,7 +16,10 @@ function mostSpecific(rules: ChatRule[]) {
 export function resolveRules(page: URL, frame: URL, local: ChatRule[], community: CommunityRules): RuleMatch[] {
   const matching = (rules: ChatRule[]) => mostSpecific(rules.filter(rule => ruleMatches(rule, page, frame)));
   return [
-    ...matching(local).map(rule => ({ rule, source: 'local' as const })),
+    ...matching(local.toReversed()).map(rule => ({ rule, source: 'local' as const })),
+    ...local.filter(rule => rule.host === page.hostname && page.origin === frame.origin &&
+      Boolean(rule.framePathPrefix) === (page.pathname !== frame.pathname) && !ruleMatches(rule, page, frame))
+      .reverse().map(rule => ({ rule, source: 'local' as const, sameSiteFallback: true })),
     ...matching(community.staged).map(rule => ({ rule, source: 'community' as const, staged: true })),
     ...matching(community.active).map(rule => ({ rule, source: 'community' as const })),
     ...matching(builtins).map(rule => ({ rule, source: 'builtin' as const })),

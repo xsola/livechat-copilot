@@ -32,6 +32,7 @@ export interface RuleMatch {
   rule: ChatRule;
   source: RuleSource;
   staged?: boolean;
+  sameSiteFallback?: boolean;
 }
 
 export function ruleMatches(rule: ChatRule, page: URL, frame: URL) {

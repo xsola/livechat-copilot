@@ -2,9 +2,10 @@ import { matches, messageText, query, queryAll, selectorPath, stableSelector, te
 import type { ChatRule } from '../../rules/schema';
 import { isYouTube } from '../../platform/config';
 
-export interface Candidate extends RuleTest { rule: ChatRule; score: number }
+export interface Candidate extends RuleTest { rule: ChatRule; score: number; alternativeComposer?: ChatRule }
 
 const chatNames = /chat|comment|message|danmaku/i;
+const editorNames = /chat|comment|message|danmaku|弹幕|彈幕|聊天|发言|發言|コメント|チャット|채팅/i;
 const messageBodies = [
   '#message', '[data-message-body]', '[data-testid*="message-text"]', '[data-testid*="message-content"]',
   '[data-a-target="chat-line-message-body"]', '[data-test-selector="chat-line-message-body"]', '.chat-line__message--message',
@@ -84,24 +85,40 @@ export function candidateFrom(
 
 export function completeCandidateRule(document: Document, region: Element, rule: ChatRule): ChatRule {
   if (rule.composer && query(document, rule.composer)) return rule;
+  return rankComposers(document, region, rule)[0]?.rule ?? rule;
+}
+
+function rankComposers(document: Document, region: Element, rule: ChatRule) {
+  const seen = new Set<Element>();
+  const ranked: Array<{ rule: ChatRule; score: number }> = [];
+  const bounds = region.getBoundingClientRect();
   for (let parent = region.parentElement, depth = 0; parent && parent !== document.body && depth < 4;
     parent = parent.parentElement, depth++) {
-    const inputs = Array.from(parent.querySelectorAll(editors)).filter(input =>
-      !region.contains(input) && !input.closest('[data-livechat-copilot], [role="search"]'));
-    const input = inputs.find(editor => chatNames.test([
-      editor.getAttribute('aria-label'), editor.getAttribute('placeholder'), editor.id,
-    ].join(' '))) ?? (inputs.length === 1 ? inputs[0] : undefined);
-    if (!input) continue;
-    const composer = selectorPath(document, input);
-    if (!composer || composer.length > 500) continue;
-    const controls = input.closest('form, yt-live-chat-message-input-renderer, [data-chat-composer]') ?? input.parentElement?.parentElement;
-    const send = Array.from(controls?.querySelectorAll('button, [role="button"], input[type="submit"]') ?? []).find(button =>
-      sendLabel.test([button.getAttribute('aria-label'), button.getAttribute('title'), button.id, button.textContent].join(' ')) ||
-      matches(button, 'button[type="submit"], input[type="submit"]'));
-    const sendButton = send ? selectorPath(document, send) : undefined;
-    return { ...rule, composer, sendButton: sendButton && sendButton.length <= 500 ? sendButton : undefined };
+    for (const input of queryAll(parent, editors).slice(0, 40)) {
+      if (seen.has(input)) continue;
+      seen.add(input);
+      if (region.contains(input) || insidePlayer(input) ||
+        input.closest('[data-livechat-copilot], [role="search"], nav, header, [hidden]') ||
+        !input.getClientRects().length || getComputedStyle(input).visibility !== 'visible') continue;
+      const box = input.getBoundingClientRect();
+      const overlap = Math.min(bounds.right, box.right) - Math.max(bounds.left, box.left);
+      const below = box.top >= bounds.bottom - 16 && box.top <= bounds.bottom + 180 &&
+        overlap >= Math.min(box.width, bounds.width) * 0.55;
+      const named = editorNames.test([input.getAttribute('aria-label'), input.getAttribute('placeholder'), input.id,
+        input.className, input.getAttribute('data-a-target')].join(' '));
+      const controls = input.closest('form, yt-live-chat-message-input-renderer, [data-chat-composer]') ?? input.parentElement?.parentElement;
+      const send = queryAll(controls ?? parent, 'button, [role="button"], input[type="submit"]').find(button =>
+        sendLabel.test([button.getAttribute('aria-label'), button.getAttribute('title'), button.id, button.textContent].join(' ')) ||
+        matches(button, 'button[type="submit"], input[type="submit"]'));
+      if (!below && !named && !send) continue;
+      const composer = selectorPath(document, input);
+      if (!composer || composer.length > 500) continue;
+      const sendButton = send ? selectorPath(document, send) : undefined;
+      const score = 4 - depth + (below ? 5 : 0) + (named ? 4 : 0) + (sendButton ? 2 : 0);
+      ranked.push({ rule: { ...rule, composer, sendButton: sendButton && sendButton.length <= 500 ? sendButton : undefined }, score });
+    }
   }
-  return rule;
+  return ranked.sort((a, b) => b.score - a.score);
 }
 
 export function composerElements(candidate: Candidate) {
@@ -154,8 +171,10 @@ export function findCandidates(document: Document, page: URL, frame: URL, activi
         element.clientHeight <= 0 || element.clientWidth <= 0) continue;
     const found = candidateFrom(document, element, page, frame);
     if (!found || found.messages.length < 2) continue;
-    const score = found.score + Math.min(5, activity.get(element) ?? 0);
-    if (score >= 4) ranked.push({ ...found, score });
+    const [first, second] = rankComposers(document, element, found.rule);
+    const alternativeComposer = first && second && first.score - second.score <= 2 ? second.rule : undefined;
+    const score = found.score + Math.min(5, activity.get(element) ?? 0) + (first ? Math.min(4, first.score) : 0);
+    if (score >= 4) ranked.push({ ...found, rule: first?.rule ?? found.rule, alternativeComposer, score });
   }
   const unique = new Set<Element>();
   return ranked.sort((a, b) => b.score - a.score).filter(candidate => {

@@ -27,6 +27,10 @@ export class Picker {
     return true;
   }
 
+  showSuggested(candidate: Candidate) {
+    this.preview(candidate, { localOnly: true });
+  }
+
   beginSearch() {
     this.endListeners();
     this.showing = undefined;
@@ -59,23 +63,39 @@ export class Picker {
       return;
     }
     const candidatesById = new Map<string, Candidate>();
-    const areas = candidates.slice(0, 4).flatMap(candidate => {
+    const choices = candidates.slice(0, 4).flatMap(candidate => candidate.alternativeComposer
+      ? [candidate, { ...candidate, rule: candidate.alternativeComposer }]
+      : [candidate]);
+    const visible = choices.flatMap(candidate => {
       try {
-        const id = 'area-' + (candidatesById.size + 1);
         const rect = captureRect(candidate.container);
-        candidatesById.set(id, candidate);
-        return [{ id, rect, ...visionSample(candidate) }];
+        return [{ candidate, rect }];
       } catch { return []; }
-    }).slice(0, 3);
-    if (!areas.length) { this.noCandidate(); return; }
+    });
+    if (!visible.length) { this.noCandidate(); return; }
     this.panel.note('正在让模型对照候选区域截图和弹幕样本…');
     try {
       await this.hideForCapture();
       if (!this.searching || this.searchEpoch !== attempt) return;
+      const areas = [];
+      for (const { candidate, rect } of visible) {
+        if (!candidate.container.isConnected) continue;
+        const editorRect = this.editorCrop(composerElements(candidate).editor);
+        if (!editorRect && [...candidatesById.values()].some(previous => previous.container === candidate.container)) continue;
+        const id: string = 'area-' + (areas.length + 1);
+        candidatesById.set(id, candidate);
+        areas.push({ id, rect, editorRect, ...visionSample(candidate) });
+        if (areas.length === 3) break;
+      }
+      if (!areas.length) { this.noCandidate(); return; }
       const result = await send('locateChat', areas);
       if (!this.searching || this.searchEpoch !== attempt) return;
       const selected = result.candidateId ? candidatesById.get(result.candidateId) : undefined;
-      if (selected) this.preview(selected, { located: true });
+      if (selected) {
+        const excludeComposer = result.useComposer === false && areas.some(area => area.id === result.candidateId && area.editorRect);
+        if (excludeComposer) selected.rule = { ...selected.rule, composer: undefined, sendButton: undefined };
+        this.preview(selected, { located: true, excludeComposer });
+      }
       else this.noCandidate();
     } catch (error) {
       if (this.searchEpoch === attempt) this.noCandidate(error instanceof Error ? error.message + ' ' : undefined);
@@ -152,12 +172,12 @@ export class Picker {
     this.panel.button('关闭', () => this.close());
   }
 
-  private preview(candidate: Candidate, automatic?: { source?: string; located?: boolean }) {
+  private preview(candidate: Candidate, automatic?: { source?: string; located?: boolean; excludeComposer?: boolean; localOnly?: boolean }) {
     this.endListeners();
     this.searching = false;
     candidate = {
       ...candidate,
-      rule: completeCandidateRule(document, candidate.container, candidate.rule),
+      rule: automatic?.excludeComposer ? candidate.rule : completeCandidateRule(document, candidate.container, candidate.rule),
     };
     this.showing = candidate;
     this.panel.highlight(candidate.container, Boolean(automatic));
@@ -167,7 +187,7 @@ export class Picker {
       : state === 'unavailable'
         ? '已找到输入区，当前无法编辑。'
         : '当前页面未识别到输入区。';
-    const sources: Record<string, string> = { builtin: '内置规则', local: '你保存的规则', community: '社区规则' };
+    const sources: Record<string, string> = { builtin: '内置规则', local: '你保存的规则', community: '社区规则', 'same-site': '同站直播间已保存的规则' };
     const { source, located } = automatic ?? {};
     if (automatic) {
       this.panel.showAside('已识别弹幕区', source
@@ -193,6 +213,7 @@ export class Picker {
       return;
     }
     if (located) { this.panel.note('已用截图比对候选位置。'); return; }
+    if (automatic?.localOnly) return;
     void this.queueReview(candidate, !automatic);
   }
 
@@ -239,6 +260,16 @@ export class Picker {
     });
   }
 
+  private editorCrop(editor: Element | null) {
+    const draft = editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement ? editor.value : editor?.textContent;
+    return editor !== document.activeElement && !draft?.trim() ? this.optionalCrop(editor) : undefined;
+  }
+
+  private optionalCrop(element: Element | null) {
+    if (!element) return;
+    try { return captureRect(element); } catch { return undefined; }
+  }
+
   private async review(candidate: Candidate) {
     if (!candidate.container.isConnected || document.visibilityState !== 'visible') {
       return { text: '直播标签页当前不在前台，已跳过图像复核。' };
@@ -246,17 +277,11 @@ export class Picker {
     try {
       const rect = captureRect(candidate.container);
       const { editor, button } = composerElements(candidate);
-      const hasDraft = () => Boolean((editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement
-        ? editor.value : editor?.textContent)?.trim());
-      const optionalCrop = (element: Element | null) => {
-        if (!element) return;
-        try { return captureRect(element); } catch { return undefined; }
-      };
       await this.hideForCapture();
       if (this.showing !== candidate || !candidate.container.isConnected) return;
       if (document.visibilityState !== 'visible') return { text: '直播标签页当前不在前台，已跳过图像复核。' };
-      const editorRect = editor === document.activeElement || hasDraft() ? undefined : optionalCrop(editor);
-      const sendRect = editorRect ? optionalCrop(button) : undefined;
+      const editorRect = this.editorCrop(editor);
+      const sendRect = editorRect ? this.optionalCrop(button) : undefined;
       const result = await send('verify', { rect, editorRect, sendRect, ...visionSample(candidate) });
       const prefix = { 'likely-chat': '可能是弹幕区', 'unlikely-chat': '可能选错了弹幕区', uncertain: '无法确定弹幕区' }[result.verdict];
       const composer = editorRect && result.composerVerdict && {

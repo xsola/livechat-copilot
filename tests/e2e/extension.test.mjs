@@ -31,7 +31,10 @@ async function boot(t) {
     const items = command.items ?? [];
     if (items.some(item => item.text === 'Slow original')) await new Promise(resolve => setTimeout(resolve, 900));
     if (command.candidates) await new Promise(resolve => setTimeout(resolve, 650));
-    const output = command.candidates ? { candidateId: command.candidates[0].id, reason: 'Image matches the sample rows.' }
+    const output = command.candidates ? {
+      candidateId: command.candidates[value.model === 'test-paired-input' ? 1 : 0].id,
+      useComposer: true, reason: 'Image matches the sample rows.',
+    }
       : command.test === 'image-capability' ? { color: 'blue' }
       : Array.isArray(content) ? { verdict: 'likely-chat', reason: 'Synthetic region confirmed.',
         composerVerdict: command.sample.editorImage ? 'likely-composer' : 'unlikely-composer' }
@@ -405,6 +408,73 @@ test('the vision model sees bounded candidate samples while automatic detection 
   assert.match(candidates[1].html, /One match remaining/);
   assert.doesNotMatch(prompt.text, /LIVE|Volume/);
   assert.match(image.image_url.url, /^data:image\/jpeg;base64,/);
+});
+
+test('rooms on one site reuse a verified local rule and suggest a different layout when it fails', { timeout: 40_000 }, async t => {
+  const { context, options, local } = await boot(t);
+  await context.route(url => url.origin === local && /^\/(alice|bob|alice\/carol)$/.test(url.pathname), route => {
+    const room = new URL(route.request().url()).pathname.split('/').at(-1);
+    const standard = room !== 'carol';
+    const list = standard ? 'chat-log' : 'new-message-list';
+    return route.fulfill({ contentType: 'text/html', body: `<main><section id="${list}" role="log">
+      <div data-message-id="first"><span class="message-body">Opening line ${room}</span></div>
+      <div data-message-id="second"><span class="message-body">Reply from ${room}</span></div></section></main>` });
+  });
+  const live = await context.newPage();
+  await live.goto(local + '/alice');
+  const tab = await tabId(options, live.url());
+  await command(options, 'attach', tab);
+  await action(options, tab, 'detect');
+  await live.getByRole('button', { name: '保存并启用规则' }).click();
+  await live.getByRole('region', { name: 'LiveChat Copilot' }).waitFor({ state: 'hidden' });
+  await command(options, 'setSite', { tabId: tab, enabled: true, origin: local });
+  await live.goto(local + '/bob');
+  await live.getByText('译：Opening line bob', { exact: true }).waitFor();
+  await action(options, tab, 'detect');
+  await live.getByText('同站直播间已保存的规则', { exact: false }).waitFor();
+  await live.goto(local + '/alice/carol');
+  await live.getByRole('button', { name: '保存并启用规则' }).waitFor();
+  assert.equal(await live.getByText('译：Opening line carol', { exact: true }).count(), 0);
+  await live.getByRole('button', { name: '保存并启用规则' }).click();
+  await live.getByText('译：Opening line carol', { exact: true }).waitFor();
+  assert.equal((await command(options, 'getSettings')).rules.local.length, 2);
+  await live.goto(local + '/alice');
+  await live.getByText('译：Opening line alice', { exact: true }).waitFor();
+});
+
+test('vision can distinguish two editor candidates paired with the same message list', { timeout: 35_000 }, async t => {
+  const { context, options, requestLog, local } = await boot(t);
+  await options.locator('#model').fill('test-paired-input');
+  await options.getByRole('button', { name: '测试当前模型' }).click();
+  await options.getByText('支持', { exact: true }).waitFor();
+  await options.locator('#auto-vision').check();
+  await options.getByRole('button', { name: '保存并授权' }).click();
+  await options.getByText('已保存。', { exact: true }).waitFor();
+  const url = local + '/paired';
+  await context.route(url, route => route.fulfill({ contentType: 'text/html', body: `<main>
+    <section role="log" id="chat-room">
+      <div data-message-id="first"><span class="message-body">Opening discussion</span></div>
+      <div data-message-id="second"><span class="message-body">Continuing discussion</span></div>
+    </section>
+    <form><textarea id="extra" aria-label="Chat"></textarea><button type="submit">Send</button></form>
+    <form><textarea id="actual" aria-label="Chat"></textarea><button type="submit">Send</button></form>
+  </main>` }));
+  const live = await context.newPage();
+  await live.goto(url);
+  await live.bringToFront();
+  const tab = await tabId(options, live.url());
+  await command(options, 'attach', tab);
+  await action(options, tab, 'detect');
+  await live.getByText('已用截图比对候选位置。', { exact: true }).waitFor();
+  const request = requestLog.find(({ messages }) => Array.isArray(messages[1].content) && JSON.parse(messages[1].content[0].text).candidates);
+  assert.ok(request);
+  const { candidates } = JSON.parse(request.messages[1].content[0].text);
+  assert.equal(candidates.length, 2);
+  assert.ok(candidates.every(candidate => candidate.editorImage));
+  assert.equal(candidates[0].html, candidates[1].html);
+  await live.getByRole('button', { name: '保存并启用规则' }).click();
+  const saved = await options.evaluate(async () => (await chrome.storage.local.get('localRules')).localRules);
+  assert.equal(saved.find(rule => rule.host === '127.0.0.1').composer, '#actual');
 });
 
 test('an endpoint that rejects images disables later visual checks while text translation still works', { timeout: 45_000 }, async t => {

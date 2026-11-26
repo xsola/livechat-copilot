@@ -61,6 +61,9 @@ test('local rules outrank staged, active and bundled rules', () => {
   assert.deepEqual(resolveRules(page, frame, [local], staged).map(result => result.rule.id),
     ['personal', 'chat', 'chat', 'youtube-live']);
   assert.equal(resolveRules(page, new URL('https://example.net/live_chat'), [local], staged).length, 0);
+  const otherRoom = { ...local, pathPrefix: '/live/another' };
+  assert.equal(resolveRules(page, frame, [otherRoom], staged)[0]?.sameSiteFallback, true);
+  assert.ok(!resolveRules(page, page, [otherRoom], staged).some(result => result.sameSiteFallback));
 });
 
 test('failed community candidate rolls back and is not downloaded as pending again', () => {

@@ -236,9 +236,11 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       try {
         const settings = await authorizedModel(pageSettings(state, page.origin));
         if (cmd.kind === 'locateChat') {
-          const image = await captureForReview(tab, sender.frameId, cmd.payload.map(({ rect }) => rect), true);
+          const image = await captureForReview(tab, sender.frameId,
+            cmd.payload.flatMap(({ rect, editorRect }) => editorRect ? [rect, editorRect] : [rect]), true);
           if ((await readState()).revision !== state.revision) throw new Error('模型设置已变化，已跳过截图查找。');
-          return await tasks.locateChat(settings, image, cmd.payload.map(({ id, html, samples }) => ({ id, html, samples })));
+          return await tasks.locateChat(settings, image,
+            cmd.payload.map(({ id, html, samples, editorRect }) => ({ id, html, samples, editorImage: Boolean(editorRect) })));
         }
         const { rect, editorRect, sendRect, html, samples } = cmd.payload;
         const image = await captureForReview(tab, sender.frameId, [rect, editorRect, sendRect].filter(r => r !== undefined));

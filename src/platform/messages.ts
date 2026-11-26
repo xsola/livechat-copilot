@@ -35,7 +35,7 @@ const payloads = {
     samples: z.array(z.string().max(300)).min(1).max(10),
   }),
   locateChat: z.array(z.object({
-    id, rect, html: z.string().min(1).max(12000), samples: z.array(z.string().max(300)).min(2).max(6),
+    id, rect, editorRect: rect.optional(), html: z.string().min(1).max(12000), samples: z.array(z.string().max(300)).min(2).max(6),
   })).min(1).max(3),
   usage: z.partialRecord(pageCounter, z.number().int().positive().max(10000)),
   getSettings: z.undefined(),
@@ -107,7 +107,7 @@ interface Results {
   decideRule: void;
   translate: TranslationItem[];
   verify: VisionAdvice;
-  locateChat: { candidateId: string | null; reason: string };
+  locateChat: { candidateId: string | null; useComposer?: boolean; reason: string };
   usage: void;
   getSettings: { settings: Settings; browserLanguage: string; rules: RuleSummary; imageUnavailable: boolean };
   saveSettings: void;

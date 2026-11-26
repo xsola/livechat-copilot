@@ -5,7 +5,7 @@ import { roomLocation } from '../rooms/metadata';
 import { languageName, normalizeLanguage } from '../rooms/language-input';
 import type { ChatRule, RuleMatch } from '../rules/schema';
 import { PageMeter } from '../usage/page-meter';
-import { testRule, invalidateSelector, type RuleTest } from './dom';
+import { testRule, invalidateSelector, queryAll, type RuleTest } from './dom';
 import { findCandidates, insidePlayer } from './detection/candidates';
 import { isTwitch, twitchChannel } from './twitch';
 import { Picker } from './detection/picker';
@@ -14,7 +14,7 @@ import { ChatSession } from './session';
 
 function localId(rule: ChatRule) {
   let hash = 2166136261;
-  for (const char of [rule.host, rule.pathPrefix, rule.framePathPrefix].join('|')) {
+  for (const char of JSON.stringify([rule.host, rule.pathPrefix, rule.framePathPrefix, rule.container, rule.message, rule.body])) {
     hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
   }
   return 'local-' + (hash >>> 0).toString(16);
@@ -57,12 +57,14 @@ export function startLiveChat(signal: AbortSignal) {
   let nextSync = 0;
   let refreshing: Promise<void> | undefined;
   let generation = 0;
+  let suggestedOnNavigation = false;
+  let observeUntil = 0;
 
   function trackActivity() {
     if (activityObserver) return;
     activityObserver = new MutationObserver(records => {
       for (const record of records.slice(-100)) {
-        if (!record.addedNodes.length) continue;
+        if (record.type === 'childList' && !record.addedNodes.length) continue;
         let node = record.target instanceof Element ? record.target : record.target.parentElement;
         if (node?.closest('[data-livechat-copilot]')) continue;
         for (let level = 0; node && level < 3; level++, node = node.parentElement) {
@@ -73,7 +75,7 @@ export function startLiveChat(signal: AbortSignal) {
         }
       }
     });
-    activityObserver.observe(document.documentElement, { childList: true, subtree: true });
+    activityObserver.observe(document.documentElement, { childList: true, characterData: true, subtree: true });
   }
 
   function stopTracking() {
@@ -109,6 +111,8 @@ export function startLiveChat(signal: AbortSignal) {
     snapshot = undefined;
     language = undefined;
     counted = false;
+    suggestedOnNavigation = false;
+    observeUntil = 0;
     searchNumber++;
     lastError = '';
     nextScan = 0;
@@ -165,7 +169,9 @@ export function startLiveChat(signal: AbortSignal) {
   function scan() {
     if (!snapshot || !language || Date.now() < nextScan) return;
     nextScan = Date.now() + 1800;
+    if (observeUntil && Date.now() >= observeUntil && !picker?.isSearching()) stopTracking();
     let selected: { match: RuleMatch; result: RuleTest } | undefined;
+    let empty: typeof selected;
     const lacking: RuleMatch[] = [];
     for (const match of snapshot.rules) {
       if (invalidateSelector(match.rule)) {
@@ -186,10 +192,13 @@ export function startLiveChat(signal: AbortSignal) {
         lacking.push(match);
         continue;
       }
-      if (result && !result.rejected) {
-        selected = { match, result };
-        break;
-      }
+      if (!result || result.rejected) continue;
+      if (match.sameSiteFallback && (queryAll(document, match.rule.container).length !== 1 ||
+        !result.container.getClientRects().length ||
+        (session?.match.rule.id !== match.rule.id || session?.container !== result.container) &&
+          new Set(result.messages.map(message => message.text).filter(Boolean)).size < 2)) continue;
+      if (result.messages.length || match.sameSiteFallback) { selected = { match, result }; break; }
+      empty ??= { match, result };
     }
     if (selected?.result.messages && selected.result.messages.length >= 2) {
       for (const missing of lacking) {
@@ -203,11 +212,29 @@ export function startLiveChat(signal: AbortSignal) {
       }
     }
     if (!selected) {
-      if (session) { session.close(); session = undefined; }
-      return;
+      if (!picker && !suggestedOnNavigation && snapshot.settings.enabled && page.pathname !== '/' &&
+        snapshot.rules.some(match => match.source === 'local')) {
+        if (!observeUntil) {
+          observeUntil = Date.now() + 5500;
+          trackActivity();
+        }
+        const [best, next] = findCandidates(document, page, frame, activity);
+        if (best && best.score >= 12 && (!next || best.score - next.score > 2) &&
+          (/^\/(?:live|room|channel)\//i.test(page.pathname) || best.container.getAttribute('role') === 'log' ||
+            (activity.get(best.container) ?? 0) >= 2)) {
+          suggestedOnNavigation = true;
+          stopTracking();
+          preparePicker().showSuggested(best);
+        }
+      }
+      if (!empty) {
+        if (session) { session.close(); session = undefined; }
+        return;
+      }
+      selected = empty;
     }
-    stopTracking();
     const { match, result } = selected;
+    if (result.messages.length) stopTracking();
     const { enabled, modelConfigured, mode, readingLanguage, revision, translateEmoji } = snapshot.settings;
     const signature = JSON.stringify([match.rule, enabled, modelConfigured, mode, readingLanguage, revision, translateEmoji]);
     if (session?.container === result.container && sessionSignature === signature) return;
@@ -266,13 +293,14 @@ export function startLiveChat(signal: AbortSignal) {
           if (!session) return false;
           const existing = testRule(document, session.match.rule);
           if (!existing?.messages.length) return false;
-          active.showMatched({ ...existing, rule: session.match.rule, score: 0 }, session.match.source);
+          active.showMatched({ ...existing, rule: session.match.rule, score: 0 },
+            session.match.sameSiteFallback ? 'same-site' : session.match.source);
           return true;
         };
         if (matched()) return;
         let candidates = findCandidates(document, page, frame, activity);
         if (!candidates[0] || candidates[0].score < 9) {
-          await new Promise(resolve => setTimeout(resolve, 650));
+          await new Promise(resolve => setTimeout(resolve, candidates.length ? 1100 : 1800));
           if (currentSearch !== searchNumber || !active.isSearching()) return;
           nextScan = 0;
           scan();
@@ -281,7 +309,7 @@ export function startLiveChat(signal: AbortSignal) {
         }
         const [best, runnerUp] = candidates;
         const canCompare = snapshot?.settings.autoVision && snapshot.settings.imageInput && snapshot.settings.modelConfigured;
-        if (best && runnerUp && canCompare && best.score - runnerUp.score <= 2) {
+        if (best && canCompare && ((runnerUp && best.score - runnerUp.score <= 2) || best.alternativeComposer)) {
           await active.locate(candidates);
         } else if (best && best.score >= 9) {
           if (active.suggest(best)) meter.count('automatic');
