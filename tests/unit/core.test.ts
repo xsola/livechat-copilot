@@ -31,18 +31,27 @@ test('room language accepts native names and common aliases', () => {
   assert.equal(normalizeLanguage('the language the host is using'), undefined);
 });
 
-test('a page override takes precedence and room rules follow the YouTube livestream ID', async () => {
+test('two scopes follow the YouTube livestream ID while preserving a legacy page switch until edited', async () => {
   const watch = new URL('https://www.youtube.com/watch?v=stream-a');
   const direct = new URL('https://www.youtube.com/live/stream-a');
   const another = new URL('https://www.youtube.com/watch?v=stream-b');
   const initial = await scopeOptions(watch, [], {});
   const room = initial.find(option => option.scope === 'room')!.key;
-  const page = initial.find(option => option.scope === 'page')!.key;
+  const page = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('page|' + watch.href))).toString('hex');
+  assert.deepEqual(initial.map(option => option.scope), ['room', 'site']);
+  const legacy = await scopeOptions(watch, [watch.origin], { [page]: false });
+  assert.equal(effectiveScope(legacy)?.value, false);
+  assert.equal(effectiveScope(legacy)?.usesLegacyPageSetting, true);
   const overrides = { [room]: true, [page]: false };
-  assert.equal(effectiveScope(await scopeOptions(watch, [], overrides))?.value, false);
+  assert.equal(effectiveScope(await scopeOptions(watch, [], overrides))?.value, true);
   assert.equal(effectiveScope(await scopeOptions(direct, [], overrides))?.value, true);
   assert.equal(effectiveScope(await scopeOptions(another, [], overrides))?.value, false);
   assert.equal(scopeValue(await scopeOptions(watch, [], overrides), 'room'), true);
+  const reset = await scopeOptions(watch, [watch.origin], { ...overrides, [room]: null });
+  assert.equal(effectiveScope(reset)?.scope, 'site');
+  const generic = await scopeOptions(new URL('https://stream.example/view/demo'), [], {});
+  assert.deepEqual(generic.map(option => option.scope), ['room', 'site']);
+  assert.equal(generic[0]?.usesPageLink, true);
 });
 
 test('local rules outrank staged, active and bundled rules', () => {

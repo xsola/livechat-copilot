@@ -414,7 +414,7 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
           }
           const overrides = { ...latest.scopeOverrides };
           delete overrides[target.key];
-          if (enabled !== null) overrides[target.key] = enabled;
+          if (enabled !== null || !target.usesPageLink) overrides[target.key] = enabled;
           return { changes: { scopeOverrides: Object.fromEntries(Object.entries(overrides).slice(-500)),
             revision: latest.revision + 1 }, result: undefined };
         });

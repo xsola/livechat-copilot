@@ -12,10 +12,10 @@ const scope = document.querySelector<HTMLSelectElement>('#scope')!;
 const resetScope = document.querySelector<HTMLButtonElement>('#reset-scope')!;
 const scopeHelp = document.getElementById('scope-help')!;
 const status = document.querySelector<HTMLParagraphElement>('#status')!;
-const actions = ['detect', 'pick', 'room'] as const;
+const actions = ['detect', 'pick'] as const;
 let tabId: number;
 let site: SiteState;
-const scopeNames: Record<TranslationScope, string> = { room: '当前直播间', page: '当前网页', site: '整个网站' };
+const scopeNames: Record<TranslationScope, string> = { room: '当前直播间', site: '本站所有直播间' };
 
 function showScope() {
   const selected = scope.value as TranslationScope;
@@ -27,8 +27,12 @@ function showScope() {
   resetScope.hidden = selected === 'site' || target.value === null;
   resetScope.disabled = false;
   const current = effectiveScope(site.scopes);
-  scopeHelp.textContent = current ? '当前页面按「' + scopeNames[current.scope] + '」设置' +
+  const active = current ? '当前页面按「' + scopeNames[current.scope] + '」设置' +
     (current.value ? '启用翻译。' : '关闭翻译。') : '';
+  const detail = target.usesLegacyPageSetting
+    ? ' 当前页面沿用旧版保存的翻译开关。修改后将按直播间保存。'
+    : target.usesPageLink ? ' 本站当前没有可识别的房间标识，按这条聊天链接保存。' : '';
+  scopeHelp.textContent = active + detail;
 }
 
 async function run(operation: () => Promise<void>) {
@@ -67,7 +71,7 @@ void run(async () => {
   tabId = tab.id;
   site = await send('site', tabId);
   siteLabel.textContent = new URL(site.origin).hostname;
-  for (const key of ['room', 'page', 'site'] as const) {
+  for (const key of ['room', 'site'] as const) {
     if (site.scopes.some(item => item.scope === key)) scope.add(new Option(scopeNames[key], key));
   }
   scope.value = effectiveScope(site.scopes)?.scope ?? 'site';
@@ -95,7 +99,7 @@ function setScope(checked: boolean | null) {
   void run(async () => {
     if (checked) await prepareSite();
     site = await send('setSite', { tabId, enabled: checked, origin: site.origin, scope: target.scope, key: target.key });
-    status.textContent = checked === null ? '已恢复到更广范围的设置。' : checked ? '已启用。' : '已关闭。';
+    status.textContent = checked === null ? '当前直播间已跟随全站设置。' : checked ? '已启用。' : '已关闭。';
     if (checked && effectiveScope(site.scopes)?.value) {
       void send('pageCommand', { tabId, action: 'initial-review' }).catch(() => undefined);
     }

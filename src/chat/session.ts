@@ -78,10 +78,6 @@ export class ChatSession {
       if (mode === 'manual') this.renderer.action(dom, () => this.submit(row, true));
       else this.submit(row);
     }
-    if (this.scheduler && this.recent.length >= 12) {
-      const cutoff = Date.now() - 120_000;
-      this.language.maybeIdentify(this.recent.filter(message => message.observedAt >= cutoff).map(message => message.text));
-    }
   }
 
   private payload(dom: DOMMessage) {

@@ -9,20 +9,19 @@
       <label class="scope-label">应用范围 <select id="scope" disabled></select></label>
       <label class="check"><input type="checkbox" id="enabled" disabled> 在所选范围启用弹幕翻译</label>
       <p id="scope-help" class="secondary"></p>
-      <button type="button" id="reset-scope" hidden>重置此范围</button>
+      <button type="button" id="reset-scope" hidden>跟随全站设置</button>
       <label class="check"><input type="checkbox" id="skip-reading" disabled> <span id="skip-label">跳过已是阅读语言的弹幕</span></label>
       <label class="check"><input type="checkbox" id="translate-emoji" disabled> 翻译表情（所有直播间）</label>
-      <p class="secondary">启用翻译后，需要翻译的弹幕正文和首次识别房间语言所需的样本会发送给你配置的模型。</p>
+      <p class="secondary">需要翻译的弹幕正文会发送给你配置的模型。</p>
     </div>
     <div class="popup-group">
       <h2>弹幕区</h2>
       <div class="actions">
-        <button type="button" id="detect" disabled>自动识别弹幕区</button>
+        <button type="button" class="primary" id="detect" disabled>自动识别弹幕区</button>
         <button type="button" id="pick" disabled>手动选择弹幕区</button>
       </div>
     </div>
     <div class="popup-group popup-footer actions">
-      <button type="button" id="room" disabled>设置直播间回复语言</button>
       <button type="button" id="options">打开设置</button>
     </div>
     <p id="status" role="status"></p>

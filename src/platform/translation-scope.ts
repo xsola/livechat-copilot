@@ -1,13 +1,15 @@
 import { z } from 'zod';
 import { isYouTube } from './config';
 
-export const scopeType = z.enum(['room', 'page', 'site']);
+export const scopeType = z.enum(['room', 'site']);
 export type TranslationScope = z.infer<typeof scopeType>;
 
 export interface ScopeOption {
   scope: TranslationScope;
   key: string;
   value: boolean | null;
+  usesPageLink?: boolean;
+  usesLegacyPageSetting?: boolean;
 }
 
 function roomIdentity(page: URL) {
@@ -25,7 +27,7 @@ async function key(value: string) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-export async function scopeOptions(page: URL, enabledSites: string[], overrides: Record<string, boolean>) {
+export async function scopeOptions(page: URL, enabledSites: string[], overrides: Record<string, boolean | null>) {
   const canonical = new URL(page);
   canonical.searchParams.sort();
   if (!canonical.hash.startsWith('#/')) canonical.hash = '';
@@ -34,12 +36,14 @@ export async function scopeOptions(page: URL, enabledSites: string[], overrides:
     key('page|' + canonical.href),
     room ? key('room|' + room) : undefined,
   ]);
-  const options: ScopeOption[] = [
-    { scope: 'page', key: pageKey, value: overrides[pageKey] ?? null },
+  const usesLegacyPageSetting = Boolean(roomKey && !Object.hasOwn(overrides, roomKey) &&
+    typeof overrides[pageKey] === 'boolean');
+  return [
+    { scope: 'room', key: roomKey ?? pageKey,
+      value: overrides[usesLegacyPageSetting ? pageKey : (roomKey ?? pageKey)] ?? null,
+      usesPageLink: !roomKey, usesLegacyPageSetting },
     { scope: 'site', key: page.origin, value: enabledSites.includes(page.origin) },
-  ];
-  if (roomKey) options.splice(1, 0, { scope: 'room', key: roomKey, value: overrides[roomKey] ?? null });
-  return options;
+  ] satisfies ScopeOption[];
 }
 
 export function effectiveScope(options: ScopeOption[]) {

@@ -272,12 +272,18 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
 });
 
 test('new site candidates and a staged community rule roll back to the last usable version', { timeout: 65_000 }, async t => {
-  const { context, worker, options, local } = await boot(t);
+  const { context, worker, options, local, origin } = await boot(t);
   const live = await context.newPage();
   await live.goto(local + '/live/demo');
   const tab = await tabId(options, live.url());
-  await command(options, 'attach', tab);
-  await action(options, tab, 'detect');
+  const popup = await context.newPage();
+  await live.bringToFront();
+  await popup.goto(origin + '/popup.html');
+  const detect = popup.getByRole('button', { name: '自动识别弹幕区' });
+  await detect.waitFor();
+  await popup.locator('#scope option').first().waitFor({ state: 'attached' });
+  assert.deepEqual(await popup.locator('#scope option').allTextContents(), ['当前直播间', '本站所有直播间']);
+  await detect.click();
   await live.getByRole('button', { name: '保存并启用规则' }).waitFor();
   await live.getByRole('button', { name: '关闭', exact: true }).click();
 
@@ -401,7 +407,7 @@ test('settings test unsaved model fields and keep the browser language as the de
   assert.equal(updated.model.model, 'test-model');
 });
 
-test('the popup scopes translation to a room, supports a page override, and skips matching languages', { timeout: 45_000 }, async t => {
+test('the popup offers only room and site scopes and skips matching languages', { timeout: 45_000 }, async t => {
   const { context, options, origin, requestLog } = await boot(t);
   const { settings } = await command(options, 'getSettings');
   await command(options, 'saveReadingSettings', { readingLanguage: 'en', mode: 'batch', prompt: settings.prompt });
@@ -411,6 +417,8 @@ test('the popup scopes translation to a room, supports a page override, and skip
   await live.bringToFront();
   await popup.goto(origin + '/popup.html');
   await popup.locator('#skip-reading').check();
+  assert.deepEqual(await popup.locator('#scope option').allTextContents(), ['当前直播间', '本站所有直播间']);
+  assert.equal(await popup.getByRole('button', { name: '设置直播间回复语言' }).count(), 0);
   await popup.locator('#scope').selectOption('room');
   await popup.locator('#enabled').check();
   await popup.getByText('当前页面按「当前直播间」设置启用翻译。', { exact: true }).waitFor();
@@ -431,13 +439,30 @@ test('the popup scopes translation to a room, supports a page override, and skip
   await chat.getByText('译：' + japanese, { exact: true }).waitFor();
   assert.equal(requestLog.some(request => JSON.stringify(request.messages[1].content).includes(english)), false);
 
-  await popup.locator('#scope').selectOption('page');
+  await popup.locator('#scope').selectOption('site');
+  await popup.locator('#enabled').check();
+  await popup.getByText('已启用。', { exact: true }).waitFor();
+  await popup.locator('#scope').selectOption('room');
   assert.equal(await popup.locator('#enabled').isChecked(), true);
   await popup.locator('#enabled').uncheck();
-  await popup.getByText('当前页面按「当前网页」设置关闭翻译。', { exact: true }).waitFor();
+  await popup.getByText('当前页面按「当前直播间」设置关闭翻译。', { exact: true }).waitFor();
   await chat.getByText('译：' + japanese, { exact: true }).waitFor({ state: 'detached' });
-  await popup.getByRole('button', { name: '重置此范围' }).click();
-  await popup.getByText('当前页面按「当前直播间」设置启用翻译。', { exact: true }).waitFor();
+  await popup.getByRole('button', { name: '跟随全站设置' }).click();
+  await popup.getByText('当前页面按「本站所有直播间」设置启用翻译。', { exact: true }).waitFor();
+
+  await chat.locator('#items').evaluate(area => {
+    for (let i = 0; i < 12; i++) {
+      const row = document.createElement('yt-live-chat-text-message-renderer');
+      const body = document.createElement('span');
+      body.id = 'message';
+      body.textContent = '楽しい配信をありがとうございます！ ' + i;
+      row.append(body);
+      area.append(row);
+    }
+  });
+  await chat.getByText('译：楽しい配信をありがとうございます！ 11', { exact: true }).waitFor();
+  assert.equal(requestLog.some(({ messages }) => typeof messages[1].content === 'string' &&
+    Object.hasOwn(JSON.parse(messages[1].content), 'lines')), false);
 
   const tab = await tabId(options, live.url());
   await command(options, 'saveReadingSettings', { readingLanguage: 'en', mode: 'manual', prompt: settings.prompt });

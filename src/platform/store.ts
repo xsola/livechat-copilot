@@ -13,7 +13,7 @@ export interface State {
   settings: Settings;
   revision: number;
   enabledSites: string[];
-  scopeOverrides: Record<string, boolean>;
+  scopeOverrides: Record<string, boolean | null>;
   localRules: ChatRule[];
   community: CommunityRules;
   roomPreferences: Record<string, RoomPreference>;
