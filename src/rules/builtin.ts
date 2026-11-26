@@ -1,4 +1,5 @@
 import type { ChatRule } from './schema';
+import { bilibiliBody, bilibiliHost, bilibiliRow } from '../chat/bilibili';
 
 const youtube: ChatRule[] = ['www.youtube.com', 'youtube.com'].map((host, index) => ({
   schemaVersion: 1,
@@ -23,4 +24,12 @@ const twitch: ChatRule[] = ['www.twitch.tv', 'twitch.tv'].map((host, index) => (
   sendButton: '[data-a-target="chat-send-button"]',
 }));
 
-export const builtins = [...youtube, ...twitch];
+const bilibiliList = ':is(#chat-history-list, .chat-history-list, .room-history-list)';
+const bilibili: ChatRule = {
+  schemaVersion: 1, id: 'bilibili-live', version: 1, host: bilibiliHost,
+  container: bilibiliList + ':has(' + bilibiliRow + '):not(:has(' + bilibiliList + ' ' + bilibiliRow + '))',
+  message: bilibiliRow,
+  body: bilibiliBody,
+};
+
+export const builtins = [...youtube, ...twitch, bilibili];

@@ -1,4 +1,5 @@
 import { builtins } from './builtin';
+import { bilibiliBody, bilibiliHost } from '../chat/bilibili';
 import { ruleMatches, type ChatRule, type RuleMatch } from './schema';
 
 export interface CommunityRules {
@@ -15,7 +16,7 @@ function mostSpecific(rules: ChatRule[]) {
 
 export function resolveRules(page: URL, frame: URL, local: ChatRule[], community: CommunityRules): RuleMatch[] {
   const matching = (rules: ChatRule[]) => mostSpecific(rules.filter(rule => ruleMatches(rule, page, frame)));
-  return [
+  const ordered: RuleMatch[] = [
     ...matching(local.toReversed()).map(rule => ({ rule, source: 'local' as const })),
     ...local.filter(rule => rule.host === page.hostname && page.origin === frame.origin &&
       Boolean(rule.framePathPrefix) === (page.pathname !== frame.pathname) && !ruleMatches(rule, page, frame))
@@ -24,6 +25,9 @@ export function resolveRules(page: URL, frame: URL, local: ChatRule[], community
     ...matching(community.active).map(rule => ({ rule, source: 'community' as const })),
     ...matching(builtins).map(rule => ({ rule, source: 'builtin' as const })),
   ];
+  if (page.hostname !== bilibiliHost) return ordered;
+  const loose = (match: RuleMatch) => match.source === 'local' && match.rule.body !== bilibiliBody;
+  return [...ordered.filter(match => !loose(match)), ...ordered.filter(loose)];
 }
 
 export function stageRules(current: CommunityRules, incoming: ChatRule[]): CommunityRules {

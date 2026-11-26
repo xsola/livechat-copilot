@@ -1,6 +1,8 @@
 import type { ChatRule } from '../rules/schema';
 
 export interface DOMMessage { node: Element; body: Element; text: string; withoutEmoji: string }
+export const messageMetadata = '[rel="author"], [data-role="author"], .author, .author-name, .chat-author, .username, [data-testid="username"], ' +
+  '#author-name, .user-name, .common-nickname-wrapper, .danmaku-item-left, .fans-medal-item, .user-level-icon, .title-label';
 export interface RuleTest { container: Element; messages: DOMMessage[]; rejected: boolean }
 
 export function query(root: ParentNode, selector: string) {
@@ -45,7 +47,7 @@ function messageParts(root: Element) {
     }
     if (node.nodeType !== 1) return;
     const element = node as Element;
-    if (element.matches('[data-livechat-copilot], script, style, [hidden], [aria-hidden="true"]')) return;
+    if (element.matches('[data-livechat-copilot], script, style, [hidden], [aria-hidden="true"], ' + messageMetadata)) return;
     if (element.matches('img, [role="img"][aria-label]')) {
       hasImage = true;
       const label = (element.getAttribute('alt') ?? element.getAttribute('aria-label') ?? '').trim();
@@ -75,7 +77,7 @@ export function messageText(root: Element) {
 export function extractRow(node: Element, rule: ChatRule): DOMMessage | undefined {
   if (matches(node, rule.ignore) || node.closest('[data-livechat-copilot]')) return;
   const body = rule.body ? query(node, rule.body) : node;
-  if (!body) return;
+  if (!body || body.closest(messageMetadata)) return;
   const { text, withoutEmoji, hasImage } = messageParts(body);
   if (text || hasImage) return { node, body, text, withoutEmoji };
 }

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="UTF-8">
+<title>Bilibili-style live chat</title>
+<style>
+  #chat-shell { width: 350px; height: 370px; margin-left: auto; border: 1px solid #888; }
+  #room-rank { height: 68px; background: #d8e6f0; }
+  #layout-wrapper { width: 210px; height: 170px; overflow: visible; }
+  #chat-history-list { width: 300px; height: 240px; overflow: auto; border: 1px solid #999; }
+  .chat-item { padding: 4px; }
+</style>
+<body>
+  <aside id="chat-shell" class="chat-history-panel">
+    <div id="room-rank">粉丝榜提示</div>
+    <div id="layout-wrapper" class="room-history-list">
+      <div id="chat-history-list" class="chat-history-list">
+        <div id="chat-items" class="chat-items">
+          <div class="chat-item danmaku-item">
+            <div class="legacy-message-body">
+              <span class="danmaku-item-left"><span class="fans-medal-item">徽章甲</span><span class="user-name">用户甲</span>：</span>
+              <span class="danmaku-item-right">这局打得很精彩</span>
+            </div>
+          </div>
+          <div class="chat-item important-prompt-item">欢迎提示</div>
+          <div class="chat-item danmaku-item">
+            <div class="legacy-message-body">
+              <span class="fans-medal-item">徽章乙</span><span class="user-name">用户乙</span>
+              <span class="danmaku-item-right">下一局继续加油<img alt="挥手表情" width="12" height="12"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+</body>
+</html>

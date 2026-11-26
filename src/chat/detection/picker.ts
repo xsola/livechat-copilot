@@ -1,8 +1,27 @@
 import { candidateFrom, candidateFromExample, completeCandidateRule, composerElements, visionSample, type Candidate } from './candidates';
-import { captureRect } from './viewport';
+import { captureRect, visibleBounds } from './viewport';
 import { send } from '../../platform/messages';
 import { PagePanel } from '../page-panel';
 import type { PageSettings } from '../../platform/config';
+
+function resizeSelection(selected: Element, cursor: Element | undefined, grow: boolean, previousLevel?: Element) {
+  const current = visibleBounds(selected);
+  const fitsInside = (outer: DOMRect, inner: DOMRect) => inner.width > 0 && inner.height > 0 &&
+    outer.left <= inner.left + 1 && outer.top <= inner.top + 1 && outer.right >= inner.right - 1 &&
+    outer.bottom >= inner.bottom - 1 && (outer.width > inner.width + 1 || outer.height > inner.height + 1);
+  if (grow) {
+    for (let node = selected.parentElement; node && node !== selected.ownerDocument.body; node = node.parentElement) {
+      if (fitsInside(visibleBounds(node), current)) return node;
+    }
+  } else if (previousLevel && selected.contains(previousLevel) && fitsInside(current, visibleBounds(previousLevel))) {
+    return previousLevel;
+  } else if (cursor && selected.contains(cursor)) {
+    const path: Element[] = [];
+    for (let node: Element | null = cursor; node && node !== selected; node = node.parentElement) path.unshift(node);
+    return path.find(node => fitsInside(current, visibleBounds(node))) ?? selected;
+  }
+  return selected;
+}
 
 export class Picker {
   private controller?: AbortController;
@@ -121,10 +140,11 @@ export class Picker {
     this.showing = undefined;
     this.selected = initial?.container;
     this.cursor = initial?.messages[0]?.node ?? initial?.container.firstElementChild ?? undefined;
+    const expandedFrom: Element[] = [];
     this.panel.highlight(this.selected, Boolean(initial));
     const choose = () => { if (this.selected) this.choose(this.selected, body, Boolean(initial)); };
     if (initial) {
-      this.panel.showAnchored('调整框选范围', '↑ 扩大一层，↓ 缩小一层。按 Enter 确认，按 Esc 关闭。');
+      this.panel.showAnchored('调整框选范围', '↑ 扩大可见区域，↓ 缩小可见区域。按 Enter 确认，按 Esc 关闭。');
       this.panel.button('确认调整', choose);
     } else {
       this.panel.showAside(body ? '点一条弹幕正文' : '手动选择弹幕区',
@@ -141,8 +161,11 @@ export class Picker {
       event.stopPropagation();
       if (event.key === 'Enter') { choose(); return; }
       const previous = this.selected;
-      if (event.key === 'ArrowUp' && this.selected.parentElement && this.selected.parentElement !== document.documentElement &&
-        (!initial || this.selected.parentElement !== document.body)) {
+      if (initial) {
+        const grow = event.key === 'ArrowUp';
+        this.selected = resizeSelection(this.selected, this.cursor, grow, grow ? undefined : expandedFrom.pop());
+        if (grow && this.selected !== previous) expandedFrom.push(previous);
+      } else if (event.key === 'ArrowUp' && this.selected.parentElement && this.selected.parentElement !== document.documentElement) {
         this.selected = this.selected.parentElement;
       } else if (event.key === 'ArrowDown' && this.cursor) {
         let descendant: Element | null = this.cursor;
@@ -151,7 +174,7 @@ export class Picker {
       }
       this.panel.highlight(this.selected, Boolean(initial));
       if (initial) {
-        const { width, height } = this.selected.getBoundingClientRect();
+        const { width, height } = visibleBounds(this.selected);
         const change = event.key === 'ArrowUp' ? '扩大' : '缩小';
         this.panel.note(this.selected === previous ? '这个方向没有可调整的层级。' :
           '已' + change + '一层（' + Math.round(width) + ' × ' + Math.round(height) + ' 像素）。');

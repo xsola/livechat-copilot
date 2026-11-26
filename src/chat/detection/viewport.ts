@@ -1,7 +1,24 @@
 import type { CaptureRect } from '../../platform/messages';
 
-export function captureRect(node: Element): CaptureRect {
+export function visibleBounds(node: Element) {
+  const view = node.ownerDocument.defaultView!;
   const rect = node.getBoundingClientRect();
+  let left = Math.max(0, rect.left);
+  let top = Math.max(0, rect.top);
+  let right = Math.min(view.innerWidth, rect.right);
+  let bottom = Math.min(view.innerHeight, rect.bottom);
+  for (let parent = node.parentElement; parent && parent !== node.ownerDocument.documentElement; parent = parent.parentElement) {
+    const style = view.getComputedStyle(parent);
+    if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
+    const clip = parent.getBoundingClientRect();
+    if (style.overflowX !== 'visible') { left = Math.max(left, clip.left); right = Math.min(right, clip.right); }
+    if (style.overflowY !== 'visible') { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom); }
+  }
+  return new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+}
+
+export function captureRect(node: Element): CaptureRect {
+  const rect = visibleBounds(node);
   let x = rect.x;
   let y = rect.y;
   let right = rect.right;

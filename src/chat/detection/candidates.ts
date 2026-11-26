@@ -1,4 +1,5 @@
-import { matches, messageText, query, queryAll, selectorPath, stableSelector, testRule, type RuleTest } from '../dom';
+import { matches, messageMetadata, messageText, query, queryAll, selectorPath, stableSelector, testRule, type RuleTest } from '../dom';
+import { bilibiliBody, bilibiliRow } from '../bilibili';
 import type { ChatRule } from '../../rules/schema';
 import { isYouTube } from '../../platform/config';
 
@@ -7,15 +8,14 @@ export interface Candidate extends RuleTest { rule: ChatRule; score: number; alt
 const chatNames = /chat|comment|message|danmaku/i;
 const editorNames = /chat|comment|message|danmaku|弹幕|彈幕|聊天|发言|發言|コメント|チャット|채팅/i;
 const messageBodies = [
-  '#message', '[data-message-body]', '[data-testid*="message-text"]', '[data-testid*="message-content"]',
+  bilibiliBody, '#message', '[data-message-body]', '[data-testid*="message-text"]', '[data-testid*="message-content"]',
   '[data-a-target="chat-line-message-body"]', '[data-test-selector="chat-line-message-body"]', '.chat-line__message--message',
   '[data-role="message-body"]', '.message-body', '.message-content', '.message-text', '.chat-text', '.comment-text', '.body', '.text',
 ];
-const author = '[rel="author"], [class*="author" i], [class*="username" i], [data-testid*="username" i], #author-name';
 const excluded = 'nav, header, footer, form, video, canvas, [role="toolbar"], [role="menu"], [data-livechat-copilot], ' +
   '[data-a-target^="player"], [data-a-target="video-player"], .video-player, [class*="player-controls" i]';
 const messageRow = '[data-a-target="chat-line-message"], [data-test-selector="chat-line-message"], .chat-line__message, ' +
-  'yt-live-chat-text-message-renderer, [data-message-id], [data-testid="chat-message"]';
+  'yt-live-chat-text-message-renderer, [data-message-id], [data-testid="chat-message"], ' + bilibiliRow;
 const rowSelector = ':is(' + messageRow + ', [role="listitem"])';
 const editors = 'textarea, [contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], input[type="text"], input:not([type])';
 const sendLabel = /\b(?:send|submit|post|chat.send)\b|发送|發送|送信|전송/i;
@@ -65,7 +65,7 @@ export function candidateFrom(
   const body = sampleRow && example !== sampleRow
     ? (fit && query(sampleRow, fit)?.contains(example!) ? fit : sharedBody(sampleRow, example!)) : fit;
   if (sampleRow && example !== sampleRow && !body) return;
-  if (!body && rows.some(row => query(row, author))) return;
+  if (!body && rows.some(row => query(row, messageMetadata))) return;
   const framePathPrefix = page.pathname === frame.pathname ? undefined : frame.pathname.slice(0, 250);
   const pathPrefix = page.pathname === '/' ? '/' : '/' + page.pathname.split('/')[1];
   const rule: ChatRule = {

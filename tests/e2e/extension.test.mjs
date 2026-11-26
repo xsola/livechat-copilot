@@ -439,6 +439,41 @@ test('Twitch finds nested chat, keeps the chosen scope, and leaves no picker on 
   assert.equal(await popup.locator('#enabled').isChecked(), false);
 });
 
+test('Bilibili isolates the chat list and body and skips parents that shrink the visible selection', { timeout: 35_000 }, async t => {
+  const { context, options, requestLog } = await boot(t);
+  const url = 'https://live.bilibili.com/12345';
+  const body = await fixture('bilibili-chat.html');
+  await context.route(url, route => route.fulfill({ contentType: 'text/html', body }));
+  await options.evaluate(() => chrome.storage.local.set({ localRules: [{
+    schemaVersion: 1, id: 'old-bilibili-local', version: 1, host: 'live.bilibili.com', pathPrefix: '/12345',
+    container: '#chat-shell', message: '.chat-item', body: '.legacy-message-body',
+  }] }));
+  const live = await context.newPage();
+  await live.goto(url);
+  const tab = await tabId(options, url);
+  await command(options, 'attach', tab);
+  await command(options, 'setSite', { tabId: tab, enabled: true, origin: new URL(url).origin });
+  await live.locator('.danmaku-item-right + [data-lcc-kind="translation"]')
+    .filter({ hasText: /^译：这局打得很精彩$/ }).waitFor();
+  assert.ok(requestLog.some(message => JSON.stringify(message).includes('下一局继续加油')));
+  assert.ok(requestLog.every(message => !/用户[甲乙]|徽章[甲乙]|粉丝榜提示|欢迎提示|挥手表情/u.test(JSON.stringify(message))));
+  await action(options, tab, 'detect');
+  const panel = live.getByRole('region', { name: 'LiveChat Copilot' });
+  await panel.getByText(/内置规则/).waitFor();
+  const outline = live.locator('[data-lcc-kind="panel"] .hover.detected');
+  assert.deepEqual(await outline.boundingBox(), await live.locator('#chat-history-list').boundingBox());
+  await panel.getByRole('button', { name: '调整框选范围' }).click();
+  await live.keyboard.press('ArrowUp');
+  assert.deepEqual(await outline.boundingBox(), await live.locator('#chat-shell').boundingBox());
+  await live.keyboard.press('ArrowDown');
+  assert.deepEqual(await outline.boundingBox(), await live.locator('#chat-history-list').boundingBox());
+  await live.keyboard.press('Enter');
+  await panel.getByText('核对弹幕样本', { exact: true }).waitFor();
+  await panel.getByText('这局打得很精彩', { exact: true }).waitFor();
+  await panel.getByRole('button', { name: '保存并启用规则' }).click();
+  await panel.waitFor({ state: 'hidden' });
+});
+
 test('the vision model sees bounded candidate samples while automatic detection displays progress', { timeout: 45_000 }, async t => {
   const { context, options, requestLog, origin, local } = await boot(t);
   await options.getByRole('button', { name: '测试当前模型' }).click();

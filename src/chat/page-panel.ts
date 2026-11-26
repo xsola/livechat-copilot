@@ -1,4 +1,5 @@
 import type { Candidate } from './detection/candidates';
+import { visibleBounds } from './detection/viewport';
 
 const styles = [
   ':host{all:initial}',
@@ -70,11 +71,7 @@ export class PagePanel {
 
   private position() {
     const { innerWidth, innerHeight } = this.document.defaultView!;
-    const bounds = this.target?.isConnected ? this.target.getBoundingClientRect() : undefined;
-    const left = Math.max(0, bounds?.left ?? 0);
-    const top = Math.max(0, bounds?.top ?? 0);
-    const right = Math.min(innerWidth, bounds?.right ?? 0);
-    const bottom = Math.min(innerHeight, bounds?.bottom ?? 0);
+    const { left, top, right, bottom } = this.target?.isConnected ? visibleBounds(this.target) : new DOMRect();
     this.outline.hidden = right <= left || bottom <= top;
     if (!this.outline.hidden) Object.assign(this.outline.style, {
       left: left + 'px', top: top + 'px', width: right - left + 'px', height: bottom - top + 'px',
