@@ -79,7 +79,8 @@ async function boot(t, locale = 'zh-CN') {
   await writeFile(manifestPath, JSON.stringify(manifest));
   context = await chromium.launchPersistentContext(path.join(root, 'profile'), {
     channel: 'chromium', headless: true, viewport: { width: 1050, height: 900 }, locale,
-    args: ['--disable-extensions-except=' + unpacked, '--load-extension=' + unpacked, '--lang=' + locale],
+    args: ['--disable-extensions-except=' + unpacked, '--load-extension=' + unpacked, '--lang=' + locale,
+      '--host-resolver-rules=MAP api.deepseek.com ~NOTFOUND'],
   });
   const [starting] = context.serviceWorkers();
   const worker = starting ?? await context.waitForEvent('serviceworker', { timeout: 15_000 });
@@ -97,13 +98,18 @@ async function boot(t, locale = 'zh-CN') {
   });
   const options = await context.newPage();
   await options.goto(origin + '/options.html');
-  await options.locator('#model').waitFor();
+  const local = 'http://127.0.0.1:' + server.address().port;
+  // This placeholder is populated only after the async settings read has rendered the model fields.
+  await options.locator('#language[placeholder]').waitFor();
   await options.locator('#model').fill('test-model');
-  await options.locator('#endpoint').fill('http://127.0.0.1:' + server.address().port + '/v1');
+  await options.locator('#endpoint').fill(local + '/v1');
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
+  const { settings } = await command(options, 'getSettings');
+  assert.equal(settings.model.endpoint, local + '/v1');
+  assert.equal(settings.model.model, 'test-model');
   await command(options, 'setSkipReadingLanguage', false);
-  return { context, worker, origin, options, requestLog, local: 'http://127.0.0.1:' + server.address().port };
+  return { context, worker, origin, options, requestLog, local };
 }
 
 
