@@ -6,6 +6,9 @@ export default defineConfig({
   srcDir: 'src',
   outDir: 'dist',
   manifestVersion: 3,
+  hooks: {
+    'build:manifestGenerated': (_wxt, manifest) => { delete manifest.side_panel; },
+  },
   manifest: {
     name: 'LiveChat Copilot',
     default_locale: 'en',
@@ -13,7 +16,7 @@ export default defineConfig({
     minimum_chrome_version: '120',
     icons,
     action: { default_icon: icons },
-    permissions: ['storage', 'activeTab', 'scripting', 'alarms'],
+    permissions: ['storage', 'activeTab', 'scripting', 'alarms', 'webNavigation'],
     host_permissions: ['https://www.youtube.com/*', 'https://youtube.com/*'],
     optional_host_permissions: ['https://*/*', 'http://*/*'],
   },

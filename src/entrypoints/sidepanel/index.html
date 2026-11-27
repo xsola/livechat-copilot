@@ -17,7 +17,7 @@
       <button id="retry" type="button" data-i18n="assistantRefresh" hidden>Check again</button>
     </div>
     <div id="workspace" hidden>
-      <div class="composer-bar">
+      <div id="composer-bar" class="composer-bar">
         <p id="composer-status" aria-live="polite"></p>
         <div class="actions">
           <button id="show-composer" type="button" data-i18n="assistantShowEditor">Show input box</button>
@@ -25,6 +25,7 @@
           <button id="pick-composer" type="button" data-i18n="assistantPickEditor">Select input box</button>
           <button id="reset-composer" type="button" data-i18n="assistantResetEditor" hidden>Use automatic detection</button>
           <button id="cancel-pick" type="button" data-i18n="assistantCancel" hidden>Cancel</button>
+          <button id="confirm-pick" type="button" class="primary" data-i18n="assistantConfirmPick" hidden>Save selected input</button>
           <button id="undo" type="button" data-i18n="assistantUndo" hidden>Undo fill</button>
         </div>
         <p id="picker-status" role="status"></p>
@@ -32,7 +33,7 @@
       <div class="task-selector actions" id="tasks">
         <button type="button" data-mode="translate" aria-pressed="true" data-i18n="assistantTranslate">Translate draft</button>
         <button type="button" data-mode="draft" aria-pressed="false" data-i18n="assistantDraft">Write reply</button>
-        <button type="button" data-mode="analysis" aria-pressed="false" data-i18n="assistantAnalysis">Analyze chat</button>
+        <button type="button" data-mode="analysis" aria-pressed="false" data-i18n="assistantAsk">Ask assistant</button>
       </div>
       <form id="task-form">
         <div id="language-controls">
@@ -45,13 +46,10 @@
           </div>
           <p id="language-note" class="secondary"></p>
         </div>
-        <label id="analysis-controls" hidden><span data-i18n="assistantAnalysisTask">What to analyze</span>
-          <select id="analysis-mode">
-            <option value="topics" data-i18n="assistantTopics">What are people discussing?</option>
-            <option value="sentiment" data-i18n="assistantSentiment">How has the mood changed?</option>
-            <option value="question" data-i18n="assistantQuestion">Ask a question</option>
-          </select>
-        </label>
+        <div id="analysis-controls" class="actions" hidden>
+          <button type="button" data-suggestion="topics" data-i18n="assistantTopics">What are people discussing?</button>
+          <button type="button" data-suggestion="sentiment" data-i18n="assistantSentiment">How has the mood changed?</button>
+        </div>
         <div id="source-controls">
           <div class="field-header">
             <label for="source" id="source-label"></label>
@@ -89,6 +87,10 @@
         <p id="coverage" class="secondary"></p>
         <p id="summary" dir="auto"></p>
         <ul id="evidence"></ul>
+      </section>
+      <section id="answer" aria-labelledby="answer-heading" hidden>
+        <h2 id="answer-heading" data-i18n="assistantAnswer">Answer</h2>
+        <p id="answer-text" dir="auto"></p>
       </section>
     </div>
   </main>

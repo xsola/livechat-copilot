@@ -19,6 +19,7 @@ export interface State {
   enabledSites: string[];
   preferredScopes: Record<string, TranslationScope>;
   scopeOverrides: Record<string, boolean | null>;
+  roomTargets: Record<string, string>;
   localRules: ChatRule[];
   localRuleAddedAt: Record<string, number>;
   selectedLocalRules: Record<string, string>;
@@ -36,6 +37,7 @@ const initial: State = {
   enabledSites: [],
   preferredScopes: {},
   scopeOverrides: {},
+  roomTargets: {},
   localRules: [],
   localRuleAddedAt: {},
   selectedLocalRules: {},

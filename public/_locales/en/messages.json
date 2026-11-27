@@ -1,4 +1,17 @@
 {
+  "defaultRoomTarget": {"message":"Default: $LANGUAGE$","placeholders":{"LANGUAGE":{"content":"$1"}}},
+  "resetRoomTarget": {"message":"Use default language"},
+  "assistantAsk": {"message":"Ask assistant"},
+  "assistantAnswer": {"message":"Answer"},
+  "assistantAskPrivacy": {"message":"Your question goes to your configured model. Recent chat is included only for questions that need live context."},
+  "assistantSearchingInput": {"message":"Looking for the chat input…"},
+  "assistantChatLoading": {"message":"Could not find the chat input. Show the live chat and try again, or select the input manually."},
+  "assistantConfirmPick": {"message":"Save selected input"},
+  "assistantPickedReady": {"message":"Input selected. Check the green outline, then save. You can click another input to change the selection."},
+  "assistantPickedUnavailable": {"message":"This area cannot be edited right now. Check whether you are signed in or allowed to chat."},
+  "assistantPickedUnusable": {"message":"The input is visible, but the extension cannot save a stable location for it."},
+  "assistantPickedMissing": {"message":"This click did not reach an editable chat input. Click where you normally type."},
+  "assistantPickCancelled": {"message":"Input selection cancelled."},
   "openAssistant": {"message":"Open chat assistant"},
   "assistantTitle": {"message":"Chat assistant"},
   "assistantConnect": {"message":"Allow this site"},
@@ -47,7 +60,7 @@
   "assistantIntent": {"message":"What would you like to say?"},
   "assistantSourcePlaceholder": {"message":"Type here or read a draft from the chat input."},
   "assistantIntentPlaceholder": {"message":"For example, ask how long the streamer has used this weapon."},
-  "assistantQuestionPlaceholder": {"message":"For example, why are people talking about that last round?"},
+  "assistantQuestionPlaceholder": {"message":"Ask about this live stream or anything else."},
   "assistantTranslationPrivacy": {"message":"The draft is sent to your configured model when you translate."},
   "assistantContextPrivacy": {"message":"The request may send your input, basic room information and recent chat text to your configured model."},
   "assistantGenerate": {"message":"Generate bilingual reply"},
@@ -108,7 +121,7 @@
     "message": "Translation preferences"
   },
   "targetLabel": {
-    "message": "Translate into"
+    "message": "Chat translation language for this room"
   },
   "skipDefault": {
     "message": "Skip messages already in the target language"
@@ -206,7 +219,7 @@
     "message": "Save"
   },
   "targetSaved": {
-    "message": "Target language saved."
+    "message": "Translation language saved for this room."
   },
   "localRuleLabel": { "message": "Rule for this stream" },
   "localRuleHelp": { "message": "Translation pauses if the selected rule cannot read this chat. Choose Auto to let the extension select a rule." },

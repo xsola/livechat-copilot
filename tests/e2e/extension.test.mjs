@@ -49,6 +49,8 @@ async function boot(t, locale = 'zh-CN') {
       : command.draft ? { translation: '訳: ' + command.draft }
       : command.intent ? { draft: 'すごい逆転！', backTranslation: '好精彩的逆转！' }
       : command.mode ? { summary: '大家在讨论最后一波。', points: [{ text: '有人称赞逆转。', evidence: [1] }] }
+      : command.question ? command.question.includes('at the end') ? { intent: 'live' }
+        : { intent: 'general', answer: '「お疲れさま」是一种常用说法。' }
       : command.check ? { ok: true } : { language: 'en', title: null, streamer: null, category: null };
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
       choices: [{ message: { content: JSON.stringify(output) } }],
@@ -138,7 +140,7 @@ test('the visible dist directory loads without modifying the manifest', { timeou
   const manifest = JSON.parse(await readFile(path.join(unpacked, 'manifest.json'), 'utf8'));
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.default_locale, 'en');
-  assert.equal(manifest.side_panel.default_path, 'sidepanel.html');
+  assert.equal(manifest.side_panel, undefined);
   assert.ok(manifest.permissions.includes('sidePanel'));
   assert.equal(manifest.host_permissions.includes('<all_urls>'), false);
   assert.equal(manifest.action.default_icon['16'], 'icons/icon-16.png');
@@ -200,7 +202,7 @@ test('YouTube assistant previews, fills and restores native drafts, handles stal
     const chat = live.frameLocator('#chatframe');
     await chat.locator('body').evaluate(body => {
       const area = document.createElement('yt-live-chat-message-input-renderer');
-      area.innerHTML = '<div id="input" contenteditable="true" style="min-height:28px">Good game!</div>' +
+      area.innerHTML = '<div id="input" contenteditable="" style="min-height:28px">Good game!</div>' +
         '<div id="send-button"><button>Send</button></div>';
       body.querySelector('yt-live-chat-item-list-renderer').after(area);
       body.dataset.sent = '0';
@@ -218,8 +220,9 @@ test('YouTube assistant previews, fills and restores native drafts, handles stal
     await panel.goto(origin + '/sidepanel.html');
     await live.bringToFront();
     await panel.getByText('已找到直播输入框', { exact: true }).waitFor();
-    await panel.locator('#show-composer').click();
+    await panel.locator('#re-detect').click();
     await chat.locator('[data-livechat-copilot="composer"]').waitFor();
+    assert.equal(await chat.locator('[data-livechat-copilot="composer"]').evaluate(el => getComputedStyle(el).borderTopColor), 'rgb(21, 128, 61)');
     await panel.locator('#read-draft').click();
     await until(async () => await panel.locator('#source').inputValue() === 'Good game!');
     await panel.locator('#reply-language').fill('jp');
@@ -249,7 +252,12 @@ test('YouTube assistant previews, fills and restores native drafts, handles stal
 
     await panel.locator('#pick-composer').click();
     await panel.getByText('请到直播页面点击实际输入框', { exact: false }).waitFor();
+    await chat.locator('#chat-editor').hover();
+    await chat.locator('[data-livechat-copilot="composer"]').waitFor({ state: 'visible' });
     await chat.locator('#chat-editor').click();
+    await panel.getByText('已选中可编辑的输入框', { exact: false }).waitFor();
+    assert.equal(Object.keys((await options.evaluate(() => chrome.storage.local.get('composerBindings'))).composerBindings ?? {}).length, 0);
+    await panel.locator('#confirm-pick').click();
     await panel.getByText('正在使用你确认的输入框', { exact: true }).waitFor();
     const saved = await options.evaluate(() => chrome.storage.local.get(['composerBindings', 'localRules']));
     assert.equal(Object.values(saved.composerBindings)[0].selector, '#chat-editor');
@@ -266,7 +274,6 @@ test('YouTube assistant previews, fills and restores native drafts, handles stal
     await panel.locator('#undo').click();
     await until(async () => await chat.locator('#chat-editor').inputValue() === '');
     await panel.locator('[data-mode="analysis"]').click();
-    await panel.locator('#analysis-mode').selectOption('question');
     await panel.locator('#source').fill('What happened at the end?');
     await panel.locator('#run-task').click();
     await panel.getByText('大家在讨论最后一波。', { exact: true }).waitFor();
@@ -280,6 +287,11 @@ test('YouTube assistant previews, fills and restores native drafts, handles stal
     assert.doesNotMatch(JSON.stringify(draftCall), /Test metadata|OriginalAuthor/);
     assert.equal(calls.find(call => call.draft === 'Good game!').context, undefined);
     assert.equal(calls.find(call => call.mode === 'question').context.messages.length, 6);
+    assert.equal(calls.find(call => !call.mode && call.question === 'What happened at the end?').context, undefined);
+    await panel.locator('[data-suggestion="topics"]').click();
+    assert.match(await panel.locator('#source').inputValue(), /刚才在聊什么/);
+    await panel.locator('#run-task').click();
+    await until(() => requestLog.some(({ messages }) => JSON.parse(messages[1].content).mode === 'topics'));
     await panel.locator('#reset-composer').click();
     await panel.getByText('已找到直播输入框', { exact: true }).waitFor();
     const tab = await tabId(options, live.url());
@@ -300,6 +312,72 @@ test('YouTube assistant previews, fills and restores native drafts, handles stal
     } });
     assert.equal(stale.kind, 'conflict');
   });
+
+test('a question outside a stream uses no page context', { timeout: 30_000 }, async t => {
+  const { context, origin, requestLog } = await boot(t);
+  const page = await context.newPage();
+  await page.goto('about:blank');
+  const panel = await context.newPage();
+  await panel.goto(origin + '/sidepanel.html');
+  await page.bringToFront();
+  await panel.locator('#source').fill('How do you say good work in Japanese?');
+  await panel.locator('#run-task').click();
+  await panel.getByText('「お疲れさま」是一种常用说法。', { exact: true }).waitFor();
+  const requests = requestLog.map(body => JSON.parse(body.messages[1].content));
+  assert.equal(requests.length, 1);
+  assert.deepEqual(Object.keys(requests[0]).sort(), ['question', 'readingLanguage']);
+});
+
+test('YouTube can locate an input outside the live chat frame and keep the chat route', { timeout: 30_000 }, async t => {
+  const { context, options } = await boot(t);
+  const live = await context.newPage();
+  await live.goto('https://www.youtube.com/watch?v=split-frames');
+  await live.bringToFront();
+  await live.locator('#chatframe').evaluate(chat => {
+    const area = document.createElement('yt-live-chat-message-input-renderer');
+    area.innerHTML = '<label><span>Chat placeholder</span><textarea aria-label="Chat input"></textarea></label>';
+    chat.after(area);
+  });
+  const tab = await tabId(options, live.url());
+  const result = await command(options, 'assistantPage', { tabId: tab, operation: { action: 'detect' } });
+  assert.equal(result.frameId, 0);
+  assert.equal(result.page.composer.state, 'ready');
+  assert.ok(result.chat.frameId > 0);
+  await live.locator('[data-livechat-copilot="composer"]').waitFor({ state: 'visible' });
+});
+
+test('toolbar preferences keep A and B separate for both the panel and translation language', { timeout: 40_000 }, async t => {
+  const { context, options, origin } = await boot(t);
+  const a = await context.newPage();
+  await a.goto('https://www.youtube.com/watch?v=one');
+  const b = await context.newPage();
+  await b.goto('https://www.youtube.com/watch?v=two');
+  const aId = await tabId(options, a.url());
+  const bId = await tabId(options, b.url());
+  const popup = await context.newPage();
+  await a.bringToFront();
+  await popup.goto(origin + '/popup.html');
+  await until(() => popup.locator('#assistant').isEnabled());
+  const enabled = id => options.evaluate(tabId => chrome.sidePanel.getOptions({ tabId }), id);
+  assert.equal((await enabled(aId)).path, 'sidepanel.html?tabId=' + aId);
+  assert.equal((await enabled(bId)).path, undefined);
+  await popup.locator('#target-language').fill('日本語');
+  await popup.locator('#save-target-language').click();
+  await popup.getByText('已保存此直播间的译文语言。', { exact: true }).waitFor();
+  await b.bringToFront();
+  await popup.reload();
+  await until(() => popup.locator('#assistant').isEnabled());
+  assert.equal(await popup.locator('#target-language').inputValue(), '');
+  await popup.locator('#target-language').fill('English');
+  await popup.locator('#save-target-language').click();
+  await popup.getByText('已保存此直播间的译文语言。', { exact: true }).waitFor();
+  assert.equal((await command(options, 'site', aId)).targetLanguage, 'ja');
+  assert.equal((await command(options, 'site', bId)).targetLanguage, 'en');
+  assert.equal((await command(options, 'getSettings')).settings.readingLanguage, '');
+  await popup.locator('#reset-target-language').click();
+  await until(async () => (await command(options, 'site', bId)).targetLanguage === '');
+  assert.equal((await command(options, 'site', aId)).targetLanguage, 'ja');
+});
 
 test('automatic review shows a body warning separately from a successful region match', { timeout: 35_000 }, async t => {
   const { context, options, requestLog } = await boot(t);
@@ -1098,7 +1176,8 @@ test('the popup offers only room and site scopes and skips matching languages', 
   assert.equal(requestLog.some(request => JSON.stringify(request.messages[1].content).includes(english)), false);
 
   const target = popup.locator('#target-language');
-  assert.equal(await target.inputValue(), '英语');
+  assert.equal(await target.inputValue(), '');
+  assert.match(await target.getAttribute('placeholder'), /默认.*英语/);
   await target.fill('日本語');
   await target.press('Enter');
   await popup.getByText('自动翻译时跳过已是日语的弹幕', { exact: true }).waitFor();
@@ -1108,13 +1187,12 @@ test('the popup offers only room and site scopes and skips matching languages', 
     JSON.parse(messages[1].content).targetLanguage === 'ja' && messages[1].content.includes(english)));
   await popup.locator('#skip-reading').uncheck();
   await chat.getByText('译：' + japanese, { exact: true }).waitFor();
-  await target.fill('');
-  await popup.getByRole('button', { name: '保存', exact: true }).click();
-  await until(async () => (await command(options, 'getSettings')).settings.readingLanguage === '');
-  assert.match(await target.getAttribute('placeholder'), /^跟随浏览器（.+）$/);
+  await popup.locator('#reset-target-language').click();
+  await until(async () => await target.inputValue() === '');
+  assert.equal((await command(options, 'getSettings')).settings.readingLanguage, 'en');
   await target.fill('en');
   await target.press('Enter');
-  await until(async () => (await command(options, 'getSettings')).settings.readingLanguage === 'en');
+  await until(async () => (await command(options, 'site', await tabId(options, live.url()))).targetLanguage === 'en');
   await popup.locator('#skip-reading').check();
 
   await popup.locator('#scope').selectOption('site');
@@ -1161,20 +1239,21 @@ test('the popup uses English fallback and accepts language names and codes outsi
   const popup = await context.newPage();
   await live.bringToFront();
   await popup.goto(origin + '/popup.html');
-  const target = popup.getByRole('textbox', { name: 'Translate into' });
+  const target = popup.getByRole('textbox', { name: 'Chat translation language for this room' });
   await target.waitFor();
   assert.equal(await popup.locator('html').getAttribute('lang'), 'en');
   assert.equal(await target.inputValue(), '');
-  assert.match(await target.getAttribute('placeholder'), /^Browser language \(.+\)$/);
+  assert.match(await target.getAttribute('placeholder'), /^Default: .+$/);
   await target.fill('not a language');
   await target.press('Enter');
   assert.equal(await target.getAttribute('aria-invalid'), 'true');
   await target.fill('Ελληνικά');
   await target.press('Enter');
-  await popup.getByText('Target language saved.', { exact: true }).waitFor();
-  assert.equal((await command(options, 'getSettings')).settings.readingLanguage, 'el');
+  await popup.getByText('Translation language saved for this room.', { exact: true }).waitFor();
+  const liveTab = await tabId(options, live.url());
+  assert.equal((await command(options, 'site', liveTab)).targetLanguage, 'el');
   assert.equal(await target.inputValue(), 'Greek');
   await target.fill('pt-BR');
   await popup.getByRole('button', { name: 'Save', exact: true }).click();
-  await until(async () => (await command(options, 'getSettings')).settings.readingLanguage === 'pt-BR');
+  await until(async () => (await command(options, 'site', liveTab)).targetLanguage === 'pt-BR');
 });

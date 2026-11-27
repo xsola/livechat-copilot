@@ -1,4 +1,17 @@
 {
+  "defaultRoomTarget": {"message":"默认：$LANGUAGE$","placeholders":{"LANGUAGE":{"content":"$1"}}},
+  "resetRoomTarget": {"message":"恢复默认语言"},
+  "assistantAsk": {"message":"问助手"},
+  "assistantAnswer": {"message":"回答"},
+  "assistantAskPrivacy": {"message":"问题会发给你配置的模型。需要直播上下文时才会附上近期弹幕。"},
+  "assistantSearchingInput": {"message":"正在查找输入框…"},
+  "assistantChatLoading": {"message":"暂未找到输入框。可以先显示直播弹幕再试，或手动选取。"},
+  "assistantConfirmPick": {"message":"确认保存输入框"},
+  "assistantPickedReady": {"message":"已选中可编辑的输入框。核对绿框后确认保存，也可以重新点选。"},
+  "assistantPickedUnavailable": {"message":"这里暂时无法编辑，请检查是否已登录或具备发言权限。"},
+  "assistantPickedUnusable": {"message":"找到了输入框，但暂时无法保存这个位置。"},
+  "assistantPickedMissing": {"message":"这里没有识别到可编辑的输入框。请点击平时输入弹幕的位置。"},
+  "assistantPickCancelled": {"message":"已取消选择输入框。"},
   "openAssistant": {"message":"打开弹幕助手"},
   "assistantTitle": {"message":"弹幕助手"},
   "assistantConnect": {"message":"允许访问本站"},
@@ -47,7 +60,7 @@
   "assistantIntent": {"message":"你想表达什么？"},
   "assistantSourcePlaceholder": {"message":"在这里输入，或读取直播输入框里的文字。"},
   "assistantIntentPlaceholder": {"message":"例如，问主播这把武器用了多久，语气随意一点。"},
-  "assistantQuestionPlaceholder": {"message":"例如，大家为什么在讨论上一局？"},
+  "assistantQuestionPlaceholder": {"message":"问直播相关的问题，或问你想了解的其他内容。"},
   "assistantTranslationPrivacy": {"message":"点击翻译时，草稿会发送给你配置的模型。"},
   "assistantContextPrivacy": {"message":"运行任务时，可能向你配置的模型发送你的输入、房间基本信息和近期弹幕正文。"},
   "assistantGenerate": {"message":"生成双语回复"},
@@ -108,7 +121,7 @@
     "message": "翻译偏好"
   },
   "targetLabel": {
-    "message": "翻译成"
+    "message": "本直播间的弹幕译文语言"
   },
   "skipDefault": {
     "message": "自动翻译时跳过已是目标语言的弹幕"
@@ -206,7 +219,7 @@
     "message": "保存"
   },
   "targetSaved": {
-    "message": "已保存目标语言。"
+    "message": "已保存此直播间的译文语言。"
   },
   "localRuleLabel": { "message": "本直播间使用的规则" },
   "localRuleHelp": { "message": "指定规则读不到弹幕时会暂停翻译。选择「自动选择」可恢复自动匹配。" },

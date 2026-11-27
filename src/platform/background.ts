@@ -134,10 +134,14 @@ async function captureForReview(tab: chrome.tabs.Tab, frameId: number | undefine
   }
 }
 
+async function sameOriginFrames(tabId: number, page: URL) {
+  return chrome.webNavigation.getAllFrames({ tabId }).then(frames => [
+    ...new Set([0, ...(frames ?? []).filter(frame => new URL(frame.url).origin === page.origin).map(frame => frame.frameId)]),
+  ]).catch(() => [0]);
+}
+
 async function findPageFrame(tabId: number) {
-  const frames = await chrome.scripting.executeScript({
-    target: { tabId, allFrames: true }, func: () => true,
-  }).then(results => results.map(result => result.frameId)).catch(() => [0]);
+  const frames = await sameOriginFrames(tabId, webUrl((await chrome.tabs.get(tabId)).url));
   const available = await Promise.all(frames.map(async frameId => ({
     frameId,
     rank: Number(await chrome.tabs.sendMessage(tabId, { pageAction: 'rank' }, { frameId }).catch(() => 0)),
@@ -160,19 +164,51 @@ async function askPage(tabId: number, frameId: number, operation: AssistantOpera
   return chrome.tabs.sendMessage(tabId, { assistant: operation }, { frameId }).catch(() => undefined);
 }
 
+async function inspectAssistantFrames(tabId: number, page: URL) {
+  return (await Promise.all((await sameOriginFrames(tabId, page)).map(async frameId => ({
+    frameId, reply: await askPage(tabId, frameId, { action: 'inspect' }),
+  })))).flatMap(({ frameId, reply }) => reply?.kind === 'page' ? [{ frameId, page: reply.page }] : []);
+}
+
+function composerRank(page: AssistantPageInfo) {
+  const state = { ready: 100, unavailable: 60, ambiguous: 40, missing: 0 }[page.composer.state];
+  const source = page.composer.source === 'manual' && state ? 180 : page.composer.source === 'rule' ? 55 : 0;
+  return state + source + (page.hasChat ? 8 : 0);
+}
+
 async function assistantPage(tabId: number, operation: AssistantOperation, frameId?: number): Promise<AssistantPageResult> {
   const tab = await chrome.tabs.get(tabId);
   if (!tab.active && operation.action !== 'cancelPick') return { kind: 'conflict' };
   const page = webUrl(tab.url);
   if (operation.action === 'context') throw new Error('That operation is available only to the model task router.');
-  if (operation.action === 'inspect' && frameId === undefined) {
+  if ((operation.action === 'inspect' && frameId === undefined) || operation.action === 'detect') {
     if (!await chrome.permissions.contains({ origins: [hostPattern(page)] })) return { kind: 'permission', origin: page.origin };
-    let frame = await findPageFrame(tabId);
-    if (!frame) {
+    let frames = await inspectAssistantFrames(tabId, page);
+    if (!frames.length) {
       await attach(tabId, page);
-      frame = await findPageFrame(tabId);
+      frames = await inspectAssistantFrames(tabId, page);
     }
-    frameId = frame?.frameId;
+    if (operation.action === 'detect' && !frames.some(frame => frame.page.composer.state !== 'missing')) {
+      await new Promise(resolve => setTimeout(resolve, 650));
+      frames = await inspectAssistantFrames(tabId, page);
+    }
+    if ((await chrome.tabs.get(tabId)).url !== page.href) return { kind: 'conflict' };
+    const [target] = frames.sort((a, b) => composerRank(b.page) - composerRank(a.page));
+    if (!target) return { kind: 'missing' };
+    const chat = frames.filter(frame => frame.page.hasChat).sort((a, b) => b.page.messageCount - a.page.messageCount)[0];
+    if (operation.action === 'detect' && target.page.composer.state !== 'missing') {
+      await askPage(tabId, target.frameId, { action: 'highlight', pageToken: target.page.pageToken });
+    }
+    return { kind: 'page', ...target, chat: chat && { frameId: chat.frameId, pageToken: chat.page.pageToken } };
+  }
+  if (operation.action === 'pick' || operation.action === 'cancelPick') {
+    const frames = await inspectAssistantFrames(tabId, page);
+    if (operation.action === 'pick' && !frames.some(frame => frame.frameId === frameId && frame.page.pageToken === operation.pageToken)) {
+      return { kind: 'conflict' };
+    }
+    const results = await Promise.all(frames.filter(frame => operation.action !== 'cancelPick' || frame.frameId !== operation.exceptFrame)
+      .map(frame => askPage(tabId, frame.frameId, { ...operation, pageToken: frame.page.pageToken })));
+    return results.some(item => item?.kind === 'picked') ? { kind: 'picked' } : { kind: 'conflict' };
   }
   if (frameId === undefined) return { kind: 'missing' };
   const result = await askPage(tabId, frameId, operation);
@@ -184,12 +220,23 @@ async function assistantPage(tabId: number, operation: AssistantOperation, frame
 async function runAssistantTask(input: AssistantTask): Promise<AssistantTaskResult> {
   const tab = await chrome.tabs.get(input.tabId);
   if (!tab.active) throw new Error('assistantPageChanged');
-  const page = webUrl(tab.url);
+  const page = input.task === 'ask' ? (tab.url && /^https?:/.test(tab.url) ? new URL(tab.url) : null) : webUrl(tab.url);
   const key = 'assistant:' + input.tabId;
   if (checksInFlight.has(key)) throw new Error('assistantAlreadyRunning');
   checksInFlight.add(key);
   try {
     const state = await readState();
+    if (input.task === 'ask') {
+      const settings = await authorizedModel(pageSettings(state, page?.origin ?? null));
+      const route = await tasks.routeQuestion(settings, input.question);
+      if (route.intent === 'general') return { kind: 'answer', answer: route.answer };
+      const chat = input.chat;
+      if (!chat || !page || (await chrome.tabs.get(input.tabId)).url !== page.href) throw new Error('notEnoughChat');
+      const result = await askPage(input.tabId, chat.frameId, { action: 'context', pageToken: chat.pageToken });
+      if (result?.kind !== 'context' || !result.roomKey.startsWith(page.origin + '|')) throw new Error('notEnoughChat');
+      return analyzeChat(tasks, settings, result.context, 'question', input.question);
+    }
+    if (!page) throw new Error('assistantPageChanged');
     if (input.task === 'resolveLanguage') {
       const settings = await authorizedModel(pageSettings(state, page.origin));
       return { kind: 'language', language: await tasks.resolveRoomLanguage(settings, input.text) };
@@ -258,7 +305,8 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
   const frame = webUrl(sender.url);
   if (page.origin !== frame.origin) throw new Error('Cross-origin chat frames are not supported in this release.');
   const state = await readState();
-  const enabled = async () => effectiveScope(await scopeOptions(page, state.enabledSites, state.scopeOverrides))?.value === true;
+  const scopesForPage = () => scopeOptions(page, state.enabledSites, state.scopeOverrides);
+  const enabled = async () => effectiveScope(await scopesForPage())?.value === true;
   const requireRoom = (key: string) => {
     if (!key.startsWith(page.origin + '|')) throw new Error('Room does not belong to this site.');
   };
@@ -273,7 +321,7 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
           enabled: effectiveScope(scopes)?.value === true, modelConfigured: granted, imageInput: imageUnavailable(state) ? false : state.settings.model.imageInput,
           translateEmoji: state.settings.translateEmoji,
           autoVision: state.settings.autoVision, revision: state.revision,
-          readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()), mode: state.settings.mode,
+          readingLanguage: readingLanguage(state.roomTargets[scopes[0]!.key] ?? state.settings.readingLanguage, chrome.i18n.getUILanguage()), mode: state.settings.mode,
         },
         rules: pinned ? rules.filter(match => match.source === 'local' && match.rule.id === pinned) : rules,
         selectedRuleId: pinned,
@@ -303,8 +351,10 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
       });
     }
     case 'translate': {
-      if (state.revision !== cmd.payload.revision || !await enabled()) throw new Error('Translation settings changed. Try again.');
-      const settings = await authorizedModel(pageSettings(state, page.origin));
+      const scopes = await scopesForPage();
+      if (state.revision !== cmd.payload.revision || !effectiveScope(scopes)?.value) throw new Error('Translation settings changed. Try again.');
+      const settings = await authorizedModel({ ...pageSettings(state, page.origin),
+        readingLanguage: state.roomTargets[scopes[0]!.key] ?? state.settings.readingLanguage });
       let items = cmd.payload.items;
       if (settings.skipReadingLanguage && settings.mode !== 'manual') {
         const skip = await Promise.all(items.map(({ text }) => alreadyInReadingLanguage(text, settings.readingLanguage)));
@@ -477,13 +527,20 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
       }));
       refreshPages();
       return;
-    case 'setTargetLanguage':
-      await editState(state => ({
-        changes: { settings: { ...state.settings, readingLanguage: cmd.payload }, revision: state.revision + 1 },
-        result: undefined,
-      }));
+    case 'setTargetLanguage': {
+      const { tabId, roomKey, language } = cmd.payload;
+      const page = webUrl((await chrome.tabs.get(tabId)).url);
+      const [scope] = await scopeOptions(page, [], {});
+      if (scope!.key !== roomKey) throw new Error('The room changed. Reopen the toolbar.');
+      const target = await editState(state => {
+        const entries = Object.entries(state.roomTargets).filter(([key]) => key !== roomKey);
+        if (language) entries.push([roomKey, language]);
+        return { changes: { roomTargets: Object.fromEntries(entries.slice(-500)), revision: state.revision + 1 },
+          result: readingLanguage(language || state.settings.readingLanguage, chrome.i18n.getUILanguage()) };
+      });
       refreshPages();
-      return readingLanguage(cmd.payload, chrome.i18n.getUILanguage());
+      return target;
+    }
     case 'saveSettings':
     case 'saveModelSettings':
     case 'saveReadingSettings': {
@@ -596,8 +653,9 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
       return {
         origin, youtube: isYouTube(page.hostname) && page.protocol === 'https:',
         translateEmoji: state.settings.translateEmoji, skipReadingLanguage: state.settings.skipReadingLanguage,
-        readingLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()),
-        targetLanguage: state.settings.readingLanguage,
+        readingLanguage: readingLanguage(state.roomTargets[scopes[0]!.key] ?? state.settings.readingLanguage, chrome.i18n.getUILanguage()),
+        targetLanguage: state.roomTargets[scopes[0]!.key] ?? '',
+        defaultTargetLanguage: readingLanguage(state.settings.readingLanguage, chrome.i18n.getUILanguage()),
         browserLanguage: readingLanguage('', chrome.i18n.getUILanguage()),
         preferredScope: state.preferredScopes[origin] ?? state.settings.preferredScope,
         scopes,

@@ -60,7 +60,9 @@ const payloads = {
   saveComposer: z.object({ key: roomKey, binding: composerBinding.nullable() }),
   setTranslateEmoji: z.boolean(),
   setSkipReadingLanguage: z.boolean(),
-  setTargetLanguage: settingsSchema.shape.readingLanguage,
+  setTargetLanguage: z.object({
+    tabId: z.number().int().nonnegative(), roomKey, language: settingsSchema.shape.readingLanguage,
+  }),
   setPreferredScope: z.object({ tabId: z.number().int().nonnegative(), origin: z.string().max(350), scope: scopeType }),
   promptContext: z.number().int().nonnegative().optional(),
   savePrompt: z.object({
@@ -97,6 +99,7 @@ export interface SiteState {
   skipReadingLanguage: boolean;
   readingLanguage: string;
   targetLanguage: string;
+  defaultTargetLanguage: string;
   browserLanguage: string;
   preferredScope: TranslationScope | null;
   scopes: ScopeOption[];

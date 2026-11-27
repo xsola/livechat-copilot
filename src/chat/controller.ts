@@ -52,6 +52,7 @@ export function startLiveChat(signal: AbortSignal) {
   let picker: Picker | undefined;
   let session: ChatSession | undefined;
   let assistant: AssistantPage | undefined;
+  let assistantUrl = '';
   let sessionSignature = '';
   let lastError = '';
   let counted = false;
@@ -104,14 +105,12 @@ export function startLiveChat(signal: AbortSignal) {
   function reset() {
     generation++;
     session?.close();
-    assistant?.close();
     picker?.close();
     panel?.host.remove();
     stopTracking();
     panel = undefined;
     picker = undefined;
     session = undefined;
-    assistant = undefined;
     sessionSignature = '';
     snapshot = undefined;
     language = undefined;
@@ -258,6 +257,11 @@ export function startLiveChat(signal: AbortSignal) {
   }
 
   function tick() {
+    const location = roomLocation();
+    if (!location || location.page.href + '|' + location.frame.href !== assistantUrl) {
+      assistant?.close();
+      assistant = undefined;
+    }
     if (!synchronize()) return;
     if (!snapshot || Date.now() >= nextSync) {
       void refresh();
@@ -378,21 +382,31 @@ export function startLiveChat(signal: AbortSignal) {
   }
 
   const listener = (message: { pageAction?: string; assistant?: unknown }, sender: chrome.runtime.MessageSender, respond: (value: unknown) => void) => {
-    if (sender.id !== chrome.runtime.id || !message || !synchronize()) return;
+    if (sender.id !== chrome.runtime.id || !message) return;
     if ('assistant' in message) {
       const parsed = assistantOperation.safeParse(message.assistant);
-      if (!parsed.success || !language) return;
-      const current = generation;
-      assistant ??= new AssistantPage(language, () => synchronize() && generation === current, () => session);
+      const location = roomLocation();
+      if (!parsed.success || !location) return;
+      const host = window.frameElement;
+      if (host && (!host.getClientRects().length || host.clientWidth < 2 || host.clientHeight < 2 ||
+        host.ownerDocument.defaultView?.getComputedStyle(host).visibility === 'hidden')) return;
+      const current = location.page.href + '|' + location.frame.href;
+      if (assistantUrl !== current) {
+        assistant?.close();
+        assistant = undefined;
+        assistantUrl = current;
+      }
+      assistant ??= new AssistantPage(new RoomLanguage(location.page, location.frame), () => {
+        const now = roomLocation();
+        return Boolean(now && now.page.href + '|' + now.frame.href === current && assistantUrl === current);
+      }, () => currentUrl === current ? session : undefined);
       const pageAssistant = assistant;
       if (parsed.data.action === 'pick') picker?.close();
-      void refresh().then(() => {
-        if (generation !== current) return { kind: 'conflict' };
-        return pageAssistant.handle(parsed.data);
-      }).then(respond, () => respond({ kind: 'conflict' }));
+      const wait = synchronize() && !snapshot ? refresh() : Promise.resolve();
+      void wait.then(() => pageAssistant.handle(parsed.data)).then(respond, () => respond({ kind: 'conflict' }));
       return true;
     }
-    if (typeof message.pageAction !== 'string') return;
+    if (typeof message.pageAction !== 'string' || !synchronize()) return;
     if (message.pageAction === 'rank') {
       respond((session ? 100 : 0) + (frame.pathname === '/live_chat' ? 20 : 0) + (window === window.top ? 2 : 1));
       return;
@@ -408,6 +422,7 @@ export function startLiveChat(signal: AbortSignal) {
     clearInterval(timer);
     chrome.runtime.onMessage.removeListener(listener);
     delete context[marker];
+    assistant?.close();
     reset();
   }, { once: true });
   tick();

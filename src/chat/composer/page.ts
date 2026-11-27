@@ -1,5 +1,5 @@
 import type { AgentContext } from '../../agent/context';
-import type { AssistantOperation, AssistantPageInfo, ComposerBinding, ComposerState } from '../../platform/assistant';
+import type { AssistantOperation, AssistantPageInfo, ComposerBinding, ComposerPickStatus, ComposerState } from '../../platform/assistant';
 import { send } from '../../platform/messages';
 import { RoomLanguage } from '../../rooms/language';
 import type { ChatSession } from '../session';
@@ -12,6 +12,7 @@ export class AssistantPage {
   private readonly editor = new ComposerEditor();
   private readonly picker = new ComposerPicker();
   private binding?: ComposerBinding;
+  private picking?: string;
 
   constructor(
     private readonly language: RoomLanguage, private readonly current: () => boolean,
@@ -19,13 +20,14 @@ export class AssistantPage {
   ) {}
 
   async handle(operation: AssistantOperation) {
+    if (!this.current()) return { kind: 'conflict' };
     if ('pageToken' in operation && operation.pageToken !== this.pageToken) return { kind: 'conflict' };
     const room = this.language.context();
     if (operation.action === 'context') {
       const messages = this.activeChat()?.context().messages ?? [];
       return { kind: 'context', context: { room, messages } satisfies AgentContext, roomKey: room.key, pageToken: this.pageToken };
     }
-    if (operation.action === 'inspect' || operation.action === 'readDraft') {
+    if (operation.action === 'inspect' || operation.action === 'detect' || operation.action === 'readDraft') {
       const [binding] = await Promise.all([send('getComposer', room.key), this.language.read()]);
       if (!this.current()) return { kind: 'conflict' };
       this.binding = binding ?? undefined;
@@ -35,20 +37,33 @@ export class AssistantPage {
       if (!this.current()) return { kind: 'conflict' };
     }
     if (operation.action === 'pick') {
-      this.picker.pick(selector => {
-        if (!this.current()) return;
-        const binding = { selector, path: location.pathname };
-        void send('saveComposer', { key: room.key, binding }).then(() => {
-          if (!this.current()) return;
-          this.binding = binding;
-          this.editor.close();
-          this.picker.highlight(this.locate().editor);
-          this.notify('saved');
-        }).catch(() => this.notify('failed'));
-      }, () => this.notify('cancelled'));
+      const selection = this.picking = operation.selection;
+      this.picker.pick(status => this.notify(status, selection));
       return { kind: 'picked' };
     }
-    if (operation.action === 'cancelPick') this.picker.close();
+    if (operation.action === 'unlockPick' && this.picking === operation.selection) {
+      this.picker.unlock();
+      return { kind: 'picked' };
+    }
+    if (operation.action === 'cancelPick') {
+      if (this.picking === operation.selection) {
+        this.picker.close();
+        this.picking = undefined;
+      }
+      return { kind: 'picked' };
+    }
+    if (operation.action === 'confirmPick') {
+      const selector = this.picker.selected();
+      if (!selector || this.picking !== operation.selection) return { kind: 'conflict' };
+      const binding = { selector, path: location.pathname };
+      await send('saveComposer', { key: room.key, binding });
+      if (!this.current()) return { kind: 'conflict' };
+      this.picker.close();
+      this.picking = undefined;
+      this.binding = binding;
+      this.editor.close();
+      this.picker.highlight(this.locate().editor);
+    }
     if (operation.action === 'resetComposer') {
       await send('saveComposer', { key: room.key, binding: null });
       if (!this.current()) return { kind: 'conflict' };
@@ -74,7 +89,7 @@ export class AssistantPage {
       kind: 'page',
       page: {
         pageToken: this.pageToken, host: location.hostname, room: this.language.context(),
-        composer, messageCount: this.activeChat()?.context().messages.length ?? 0,
+        composer, messageCount: this.activeChat()?.context().messages.length ?? 0, hasChat: Boolean(this.activeChat()),
         undoTicket: this.editor.undoTicket(target.editor),
       } satisfies AssistantPageInfo,
     };
@@ -90,7 +105,7 @@ export class AssistantPage {
     return locateComposer(this.binding, chat?.container, chat?.match.rule);
   }
 
-  private notify(status: 'saved' | 'cancelled' | 'failed') {
-    if (this.current()) void chrome.runtime.sendMessage({ composerPicked: status, pageToken: this.pageToken }).catch(() => undefined);
+  private notify(status: ComposerPickStatus, selection: string) {
+    if (this.current()) void chrome.runtime.sendMessage({ composerPicked: status, pageToken: this.pageToken, selection }).catch(() => undefined);
   }
 }

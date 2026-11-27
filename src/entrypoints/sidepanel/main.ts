@@ -1,6 +1,6 @@
 import '../../platform/ui.css';
 import './style.css';
-import type { AssistantOperation, AssistantPageInfo, AssistantPageResult, AssistantTask, AssistantTaskResult } from '../../platform/assistant';
+import type { AssistantOperation, AssistantPageInfo, AssistantPageResult, AssistantTask, AssistantTaskResult, ComposerPickStatus } from '../../platform/assistant';
 import { hostPattern } from '../../platform/config';
 import { localizePage, message } from '../../platform/i18n';
 import { send } from '../../platform/messages';
@@ -14,11 +14,13 @@ const source = get<HTMLTextAreaElement>('source');
 const output = get<HTMLTextAreaElement>('result');
 const language = get<HTMLInputElement>('reply-language');
 const tone = get<HTMLSelectElement>('tone');
-const analysisMode = get<HTMLSelectElement>('analysis-mode');
 const modeButtons = document.querySelectorAll<HTMLButtonElement>('#tasks button');
+const suggestions = document.querySelectorAll<HTMLButtonElement>('[data-suggestion]');
+const tabParam = new URLSearchParams(location.search).get('tabId');
+const panelTab = tabParam && /^\d+$/.test(tabParam) ? Number(tabParam) : undefined;
 
 type Mode = 'translate' | 'draft' | 'analysis';
-type BoundPage = { tabId: number; frameId: number; page: AssistantPageInfo };
+type BoundPage = { tabId: number; frameId: number; page: AssistantPageInfo; chat?: { frameId: number; pageToken: string } };
 type Guard = { ticket: string; hasDraft: boolean };
 type Preview = { text: string; comparison: string; language: string; mode: 'translate' | 'draft'; guard?: Guard; filled?: boolean };
 let mode: Mode = 'translate';
@@ -30,6 +32,9 @@ let epoch = 0;
 let languageDirty = false;
 let busy = false;
 let picking = false;
+let selection: string | undefined;
+let selectedEditor: { frameId: number; pageToken: string; status: ComposerPickStatus } | undefined;
+let suggestion: { mode: 'topics' | 'sentiment'; text: string } | undefined;
 let preview: Preview | undefined;
 let sourceGuard: Guard | undefined;
 let sourceWasRead = false;
@@ -54,6 +59,11 @@ function guard(page: AssistantPageInfo): Guard | undefined {
 }
 
 function updateControls() {
+  get('composer-bar').hidden = !active;
+  for (const element of modeButtons) element.disabled = busy || !active && element.dataset.mode !== 'analysis';
+  for (const element of suggestions) element.disabled = busy || !active?.chat;
+  button('run-task').disabled = busy || picking || currentTab === undefined;
+  source.readOnly = busy;
   if (!active) return;
   const { composer, undoTicket } = active.page;
   const ready = composer.state === 'ready';
@@ -62,7 +72,7 @@ function updateControls() {
   status('composer-status', states[composer.state]);
   button('show-composer').hidden = !ready && composer.state !== 'unavailable';
   button('show-composer').disabled = busy || picking;
-  button('re-detect').hidden = ready || picking;
+  button('re-detect').hidden = picking;
   button('re-detect').disabled = busy;
   button('pick-composer').hidden = picking;
   button('pick-composer').disabled = busy;
@@ -70,18 +80,16 @@ function updateControls() {
   button('reset-composer').disabled = busy;
   button('cancel-pick').hidden = !picking;
   button('cancel-pick').disabled = busy;
+  button('confirm-pick').hidden = !picking || selectedEditor?.status !== 'ready';
+  button('confirm-pick').disabled = busy;
   button('read-draft').hidden = mode !== 'translate';
   button('read-draft').disabled = busy || picking || !ready;
   button('undo').hidden = !undoTicket;
   button('undo').disabled = busy || picking;
-  button('run-task').disabled = busy || picking;
   button('save-language').disabled = busy || picking;
   button('infer-language').disabled = busy || picking;
-  for (const element of modeButtons) element.disabled = busy;
-  source.readOnly = busy;
   language.readOnly = busy;
   tone.disabled = busy;
-  analysisMode.disabled = busy;
 
   const canFill = ready && preview?.guard && composer.ticket === preview.guard.ticket;
   button('apply').disabled = busy || picking || !canFill || !output.value.trim();
@@ -98,37 +106,32 @@ function clearResults() {
   output.value = '';
   get('preview').hidden = true;
   get('analysis-result').hidden = true;
+  get('answer').hidden = true;
   get('evidence').replaceChildren();
 }
 
 function renderMode() {
-  const freeQuestion = analysisMode.value === 'question';
   for (const element of modeButtons) element.setAttribute('aria-pressed', String(element.dataset.mode === mode));
   get('language-controls').hidden = mode === 'analysis';
   get('tone-controls').hidden = mode !== 'draft';
   get('analysis-controls').hidden = mode !== 'analysis';
-  get('source-controls').hidden = mode === 'analysis' && !freeQuestion;
+  get('source-controls').hidden = false;
   source.maxLength = mode === 'translate' ? 600 : 500;
   status('source-label', mode === 'translate' ? 'assistantSource' : mode === 'draft' ? 'assistantIntent' : 'assistantYourQuestion');
   source.placeholder = message(mode === 'translate' ? 'assistantSourcePlaceholder' :
     mode === 'draft' ? 'assistantIntentPlaceholder' : 'assistantQuestionPlaceholder');
   status('source-note', '');
-  button('run-task').textContent = message(mode === 'translate' ? 'assistantTranslate' : mode === 'draft' ? 'assistantGenerate' : 'assistantRunAnalysis');
-  status('privacy-note', mode === 'translate' ? 'assistantTranslationPrivacy' : 'assistantContextPrivacy');
+  button('run-task').textContent = message(mode === 'translate' ? 'assistantTranslate' : mode === 'draft' ? 'assistantGenerate' : 'assistantAsk');
+  status('privacy-note', mode === 'translate' ? 'assistantTranslationPrivacy' : mode === 'draft' ? 'assistantContextPrivacy' : 'assistantAskPrivacy');
   updateControls();
 }
 
 function showPage(tabId: number, result: Extract<AssistantPageResult, { kind: 'page' }>) {
   const previous = active?.page;
   if (previous && previous.pageToken !== result.page.pageToken) {
-    clearResults();
-    source.value = '';
     sourceGuard = undefined;
-    sourceWasRead = false;
-    languageDirty = false;
-    picking = false;
   }
-  active = { tabId, frameId: result.frameId, page: result.page };
+  active = { tabId, frameId: result.frameId, page: result.page, chat: Object.hasOwn(result, 'chat') ? result.chat : active?.chat };
   const { room } = result.page;
   get('room').textContent = [...new Set([room.title, room.streamer, result.page.host].filter(Boolean))].join(' · ');
   if (!languageDirty) setLanguage(room.replyLanguage);
@@ -139,21 +142,40 @@ function showPage(tabId: number, result: Extract<AssistantPageResult, { kind: 'p
   updateControls();
 }
 
+function stopPicking(bound = active, exceptFrame?: number) {
+  const id = selection;
+  selection = undefined;
+  selectedEditor = undefined;
+  picking = false;
+  if (!bound || !id) return Promise.resolve();
+  return send('assistantPage', { tabId: bound.tabId, frameId: bound.frameId,
+    operation: { action: 'cancelPick', pageToken: bound.page.pageToken, selection: id, exceptFrame },
+  }).catch(() => undefined);
+}
+
+function showQuestionOnly() {
+  active = undefined;
+  if (mode !== 'analysis') {
+    mode = 'analysis';
+    source.value = '';
+    renderMode();
+  }
+  get('workspace').hidden = false;
+  updateControls();
+}
+
 async function connect(reset = false) {
   const current = ++epoch;
   const previous = active;
   if (reset) {
-    if (previous && picking) {
-      void send('assistantPage', {
-        tabId: previous.tabId, frameId: previous.frameId, operation: { action: 'cancelPick', pageToken: previous.page.pageToken },
-      }).catch(() => undefined);
-    }
+    void stopPicking(previous);
     active = undefined;
     picking = false;
     busy = false;
     sourceGuard = undefined;
     sourceWasRead = false;
     source.value = '';
+    suggestion = undefined;
     clearResults();
     setLanguage(null);
     status('picker-status', '');
@@ -167,7 +189,8 @@ async function connect(reset = false) {
   button('connect').hidden = true;
   button('retry').hidden = true;
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = panelTab === undefined ? (await chrome.tabs.query({ active: true, currentWindow: true }))[0] :
+      await chrome.tabs.get(panelTab);
     if (current !== epoch) return;
     if (tab?.id === undefined) throw new Error('openStreamFirst');
     currentTab = tab.id;
@@ -179,15 +202,17 @@ async function connect(reset = false) {
       pendingOrigin = result.origin;
       button('connect').hidden = false;
       status('connection-status', 'assistantAccess', new URL(result.origin).hostname);
+      showQuestionOnly();
     } else throw new Error('assistantUnavailable');
   } catch (error) {
     if (current !== epoch) return;
     get('connection-status').textContent = describeError(error);
     button('retry').hidden = false;
+    if (currentTab !== undefined) showQuestionOnly();
   }
 }
 
-type BoundOperation = Exclude<AssistantOperation, { action: 'inspect' }>;
+type BoundOperation = Extract<AssistantOperation, { pageToken: string }>;
 type PageAction<T = BoundOperation> = T extends BoundOperation ? Omit<T, 'pageToken'> : never;
 type TaskInput<T = AssistantTask> = T extends AssistantTask ? Omit<T, 'tabId' | 'frameId' | 'pageToken'> : never;
 
@@ -196,11 +221,11 @@ function requireActive() {
   return active;
 }
 
-async function pageAction(operation: PageAction) {
+async function pageAction(operation: PageAction, target?: { frameId: number; pageToken: string }) {
   const bound = requireActive();
   const current = epoch;
-  const result = await send('assistantPage', { tabId: bound.tabId, frameId: bound.frameId,
-    operation: { ...operation, pageToken: bound.page.pageToken } });
+  const result = await send('assistantPage', { tabId: bound.tabId, frameId: target?.frameId ?? bound.frameId,
+    operation: { ...operation, pageToken: target?.pageToken ?? bound.page.pageToken } });
   if (current !== epoch) throw new Error('assistantPageChanged');
   if (result.kind === 'page') showPage(bound.tabId, result);
   return result;
@@ -218,11 +243,19 @@ async function refreshBound() {
 }
 
 async function task(input: TaskInput) {
-  const { tabId, frameId, page } = requireActive();
   const current = epoch;
+  if (input.task === 'ask') {
+    if (currentTab === undefined) throw new Error('assistantPageChanged');
+    const result = await send('assistantTask', { ...input, tabId: currentTab, chat: active?.chat });
+    if (current !== epoch) throw new Error('assistantPageChanged');
+    return result;
+  }
+  const { tabId, frameId, page, chat } = requireActive();
+  if ((input.task === 'analysis' || input.task === 'inferLanguage') && !chat) throw new Error('notEnoughChat');
+  const context = input.task !== 'translate' && chat ? chat : { frameId, pageToken: page.pageToken };
   const result = await send('assistantTask', input.task === 'resolveLanguage'
     ? { ...input, tabId }
-    : { ...input, tabId, frameId, pageToken: page.pageToken });
+    : { ...input, tabId, ...context });
   if (current !== epoch) throw new Error('assistantPageChanged');
   return result;
 }
@@ -297,13 +330,21 @@ for (const element of modeButtons) element.addEventListener('click', () => {
   if (element.dataset.mode === mode) return;
   mode = element.dataset.mode as Mode;
   source.value = '';
+  suggestion = undefined;
   sourceGuard = undefined;
   sourceWasRead = false;
   clearResults();
   status('task-status', '');
   renderMode();
 });
-analysisMode.addEventListener('change', renderMode);
+for (const element of suggestions) element.addEventListener('click', () => {
+  const mode = element.dataset.suggestion as 'topics' | 'sentiment';
+  const text = message(mode === 'topics' ? 'assistantTopics' : 'assistantSentiment');
+  suggestion = { mode, text };
+  source.value = text;
+  source.focus();
+});
+source.addEventListener('input', () => { if (suggestion?.text !== source.value) suggestion = undefined; });
 language.addEventListener('input', () => { languageDirty = true; });
 output.addEventListener('input', () => {
   if (preview) preview.filled = false;
@@ -317,14 +358,15 @@ get<HTMLFormElement>('task-form').addEventListener('submit', event => {
   void run('assistantWorking', async () => {
     const text = source.value;
     const maximum = mode === 'translate' ? 600 : 500;
-    if (mode !== 'analysis' && !text.trim()) throw new Error('assistantNeedText');
+    if (!text.trim()) throw new Error(mode === 'analysis' ? 'needQuestion' : 'assistantNeedText');
     if (text.length > maximum) throw new Error('assistantTextTooLong');
-    if (mode === 'analysis' && analysisMode.value === 'question' && !text.trim()) throw new Error('needQuestion');
     clearResults();
     if (mode === 'analysis') {
-      const selection = analysisMode.value as 'topics' | 'sentiment' | 'question';
-      const result = await task({ task: 'analysis', mode: selection, question: selection === 'question' ? text.trim() : '' });
+      const result = suggestion && suggestion.text === text
+        ? await task({ task: 'analysis', mode: suggestion.mode, question: '' })
+        : await task({ task: 'ask', question: text.trim() });
       if (result.kind === 'analysis') showAnalysis(result);
+      if (result.kind === 'answer') { get('answer-text').textContent = result.answer; get('answer').hidden = false; }
     } else {
       const page = await refreshBound();
       const target = await replyLanguage();
@@ -352,19 +394,39 @@ button('show-composer').addEventListener('click', () => { void run('', async () 
   const result = await pageAction({ action: 'highlight' });
   if (result.kind !== 'page') throw new Error('assistantPageChanged');
 }); });
-button('re-detect').addEventListener('click', () => { void connect(); });
+button('re-detect').addEventListener('click', () => { void run('assistantSearchingInput', async () => {
+  const bound = requireActive();
+  const current = epoch;
+  const result = await send('assistantPage', { tabId: bound.tabId, operation: { action: 'detect' } });
+  if (current !== epoch || result.kind !== 'page') throw new Error('assistantPageChanged');
+  showPage(bound.tabId, result);
+  const states = { ready: 'assistantEditorReady', unavailable: 'assistantEditorUnavailable',
+    ambiguous: 'assistantEditorAmbiguous', missing: result.chat ? 'assistantEditorMissing' : 'assistantChatLoading' };
+  status('picker-status', states[result.page.composer.state]);
+}, 'picker-status'); });
 button('reset-composer').addEventListener('click', () => { void run('', async () => {
   if ((await pageAction({ action: 'resetComposer' })).kind !== 'page') throw new Error('assistantPageChanged');
   status('picker-status', 'assistantEditorReset');
 }, 'picker-status'); });
 button('pick-composer').addEventListener('click', () => { void run('assistantClickInput', async () => {
-  const result = await pageAction({ action: 'pick' });
-  if (result.kind !== 'picked') throw new Error('assistantPageChanged');
+  const id = selection = crypto.randomUUID();
   picking = true;
+  const result = await pageAction({ action: 'pick', selection: id });
+  if (result.kind !== 'picked') {
+    await stopPicking();
+    throw new Error('assistantPageChanged');
+  }
 }, 'picker-status'); });
 button('cancel-pick').addEventListener('click', () => { void run('', async () => {
-  await pageAction({ action: 'cancelPick' });
-  picking = false;
+  await stopPicking();
+}, 'picker-status'); });
+button('confirm-pick').addEventListener('click', () => { void run('', async () => {
+  if (!selection || selectedEditor?.status !== 'ready') return;
+  const frameId = selectedEditor.frameId;
+  const result = await pageAction({ action: 'confirmPick', selection }, selectedEditor);
+  if (result.kind !== 'page') throw new Error('assistantPickFailed');
+  await stopPicking(active, frameId);
+  status('picker-status', 'assistantEditorSaved');
 }, 'picker-status'); });
 button('save-language').addEventListener('click', () => { void run('assistantSavingLanguage', async () => {
   const code = await replyLanguage();
@@ -422,22 +484,32 @@ button('connect').addEventListener('click', () => {
 });
 button('retry').addEventListener('click', () => { void connect(); });
 chrome.runtime.onMessage.addListener((event, sender) => {
-  if (sender.id !== chrome.runtime.id || !active || sender.tab?.id !== active.tabId || sender.frameId !== active.frameId ||
-    event?.pageToken !== active.page.pageToken) return;
-  if (event.composerPicked !== 'saved' && event.composerPicked !== 'failed' && event.composerPicked !== 'cancelled') return;
-  picking = false;
+  if (sender.id !== chrome.runtime.id || !active || sender.tab?.id !== active.tabId || sender.frameId === undefined ||
+    !selection || event?.selection !== selection || typeof event?.pageToken !== 'string') return;
+  const feedback = { ready: 'assistantPickedReady', unavailable: 'assistantPickedUnavailable', unusable: 'assistantPickedUnusable',
+    'no-editor': 'assistantPickedMissing', cancelled: 'assistantPickCancelled' } as const;
+  if (!Object.hasOwn(feedback, event.composerPicked)) return;
+  const outcome = event.composerPicked as ComposerPickStatus;
+  if (outcome === 'cancelled') void stopPicking();
+  else {
+    const previous = selectedEditor;
+    selectedEditor = { frameId: sender.frameId, pageToken: event.pageToken, status: outcome };
+    if (previous && previous.frameId !== sender.frameId) void pageAction({ action: 'unlockPick', selection }, previous).catch(() => undefined);
+  }
+  status('picker-status', feedback[outcome]);
   updateControls();
-  if (event.composerPicked === 'saved') {
-    void run('assistantEditorSaved', async () => { await refreshBound(); }, 'picker-status');
-  } else status('picker-status', event.composerPicked === 'failed' ? 'assistantPickFailed' : '');
 });
-chrome.tabs.onActivated.addListener(({ windowId }) => {
-  if (currentWindow === undefined || windowId === currentWindow) void connect(true);
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  if (panelTab === undefined) {
+    if (currentWindow === undefined || windowId === currentWindow) void connect(true);
+  } else if (tabId !== panelTab && windowId === currentWindow && picking) {
+    void stopPicking();
+    status('picker-status', '');
+    updateControls();
+  } else if (tabId === panelTab && !active) void connect();
 });
 window.addEventListener('pagehide', () => {
-  if (!active || !picking) return;
-  void send('assistantPage', { tabId: active.tabId, frameId: active.frameId,
-    operation: { action: 'cancelPick', pageToken: active.page.pageToken } }).catch(() => undefined);
+  if (picking) void stopPicking();
 });
 chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (tabId !== currentTab) return;

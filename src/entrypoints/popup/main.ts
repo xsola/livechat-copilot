@@ -15,6 +15,7 @@ const skipReading = document.querySelector<HTMLInputElement>('#skip-reading')!;
 const targetLanguage = document.querySelector<HTMLInputElement>('#target-language')!;
 const targetForm = document.querySelector<HTMLFormElement>('#target-language-form')!;
 const saveTarget = document.querySelector<HTMLButtonElement>('#save-target-language')!;
+const resetTarget = document.querySelector<HTMLButtonElement>('#reset-target-language')!;
 const skipLabel = document.getElementById('skip-label')!;
 const scope = document.querySelector<HTMLSelectElement>('#scope')!;
 const resetScope = document.querySelector<HTMLButtonElement>('#reset-scope')!;
@@ -85,6 +86,7 @@ async function command(pageAction: typeof actions[number]) {
 function showTargetLanguage() {
   skipLabel.textContent = message('skipLanguage', languageName(site.readingLanguage, uiLocale));
   targetLanguage.value = site.targetLanguage ? languageName(site.targetLanguage, uiLocale) : '';
+  resetTarget.hidden = !site.targetLanguage;
 }
 
 const rulePicker = document.getElementById('local-rule-picker')!;
@@ -116,6 +118,7 @@ void run(async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id === undefined) throw new Error(message('openStreamFirst'));
   tabId = tab.id;
+  await chrome.sidePanel.setOptions({ tabId, path: 'sidepanel.html?tabId=' + tabId, enabled: true });
   assistant.disabled = false;
   site = await send('site', tabId);
   siteLabel.textContent = new URL(site.origin).hostname;
@@ -129,7 +132,7 @@ void run(async () => {
   emoji.disabled = false;
   skipReading.checked = site.skipReadingLanguage;
   skipReading.disabled = false;
-  targetLanguage.placeholder = message('browserTarget', languageName(site.browserLanguage, uiLocale));
+  targetLanguage.placeholder = message('defaultRoomTarget', languageName(site.defaultTargetLanguage, uiLocale));
   targetLanguage.disabled = false;
   saveTarget.disabled = false;
   showTargetLanguage();
@@ -173,6 +176,28 @@ resetScope.addEventListener('click', () => setScope(null));
 
 targetLanguage.addEventListener('input', () => targetLanguage.removeAttribute('aria-invalid'));
 
+async function saveRoomTarget(preference: string) {
+  const room = site.scopes.find(item => item.scope === 'room');
+  if (!room) return;
+  targetLanguage.disabled = true;
+  saveTarget.disabled = true;
+  resetTarget.disabled = true;
+  try {
+    if (preference !== site.targetLanguage) {
+      site.readingLanguage = await send('setTargetLanguage', { tabId, roomKey: room.key, language: preference });
+      site.targetLanguage = preference;
+    }
+    showTargetLanguage();
+    status.textContent = message(preference ? 'targetSaved' : 'resetRoomTarget');
+  } finally {
+    targetLanguage.disabled = false;
+    saveTarget.disabled = false;
+    resetTarget.disabled = false;
+  }
+}
+
+resetTarget.addEventListener('click', () => { void run(() => saveRoomTarget('')); });
+
 targetForm.addEventListener('submit', event => {
   event.preventDefault();
   const input = targetLanguage.value.trim();
@@ -184,16 +209,7 @@ targetForm.addEventListener('submit', event => {
     targetLanguage.focus();
     return;
   }
-  targetLanguage.disabled = true;
-  saveTarget.disabled = true;
-  void run(async () => {
-    if (preference !== site.targetLanguage) {
-      site.readingLanguage = await send('setTargetLanguage', preference);
-      site.targetLanguage = preference;
-    }
-    showTargetLanguage();
-    status.textContent = message('targetSaved');
-  }).finally(() => { targetLanguage.disabled = false; saveTarget.disabled = false; });
+  void run(() => saveRoomTarget(preference));
 });
 
 skipReading.addEventListener('change', () => {

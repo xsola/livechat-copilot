@@ -174,6 +174,15 @@ export function createTasks(meter: Meter, request = fetch) {
         return output;
       }, 1100);
     },
+    routeQuestion(settings: ModelSettings, question: string) {
+      return call('agent', settings, localizedPrompt(settings.uiLanguage,
+        'Decide whether the question needs facts about the currently open live stream or its chat. Use {"intent":"live"} only when those facts are needed. Otherwise answer the question directly in readingLanguage using {"intent":"general","answer":"your answer"}. Do not invent live context. The question field is the user question.',
+        '判断回答问题是否需要当前直播间或弹幕的事实。需要时返回 {"intent":"live"}。其他问题用 readingLanguage 直接回答，返回 {"intent":"general","answer":"回答正文"}。不要编造直播内容。question 字段是用户的问题。'),
+      { question, readingLanguage: settings.readingLanguage }, value => requireResult(z.discriminatedUnion('intent', [
+        z.object({ intent: z.literal('live') }),
+        z.object({ intent: z.literal('general'), answer: z.string().trim().min(1).max(3500) }),
+      ]), value), 1400);
+    },
     async probe(settings: ModelSettings): Promise<ModelProbe> {
       const start = performance.now();
       try {
