@@ -106,6 +106,25 @@ async function boot(t, locale = 'zh-CN') {
   return { context, worker, origin, options, requestLog, local: 'http://127.0.0.1:' + server.address().port };
 }
 
+
+async function probeModel(options, expectedImage = '支持') {
+  await options.bringToFront();
+  await options.locator('#test').click();
+  try {
+    await options.waitForFunction(() => {
+      const button = document.querySelector('#test');
+      const state = document.querySelector('#test-connection').textContent;
+      return !button.disabled && (state === '连接正常' || state === '测试失败');
+    }, { }, { timeout: 18_000 });
+  } catch (error) {
+    const detail = await options.locator('#test-detail').textContent();
+    throw new Error('Model probe did not finish: ' + detail, { cause: error });
+  }
+  const detail = await options.locator('#test-detail').textContent();
+  assert.equal(await options.locator('#test-connection').textContent(), '连接正常', detail);
+  assert.equal(await options.locator('#test-image').textContent(), expectedImage, detail);
+}
+
 function command(options, kind, payload) {
   return options.evaluate(async args => {
     const result = await chrome.runtime.sendMessage(args);
@@ -161,8 +180,7 @@ test('the visible dist directory loads without modifying the manifest', { timeou
 
 test('YouTube restricted input is recognized without inferring a send-area mismatch', { timeout: 40_000 }, async t => {
   const { context, options, requestLog } = await boot(t);
-  await options.getByRole('button', { name: '测试当前模型' }).click();
-  await options.getByText('支持', { exact: true }).waitFor();
+  await probeModel(options);
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   const live = await context.newPage();
@@ -381,8 +399,7 @@ test('automatic review shows a body warning separately from a successful region 
   const { browserLanguage, settings } = await command(options, 'getSettings');
   await command(options, 'saveReadingSettings', { readingLanguage: 'ja', mode: settings.mode, prompt: settings.prompt });
   await options.locator('#model').fill('test-review-mixed');
-  await options.getByRole('button', { name: '测试当前模型' }).click();
-  await options.getByText('支持', { exact: true }).waitFor();
+  await probeModel(options);
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -457,8 +474,7 @@ test('YouTube iframe translates incrementally, saves a manual override, and reus
   await chat.getByText('译：Fresh content').waitFor();
   assert.equal(await chat.getByText('译：Slow original').count(), 0);
 
-  await options.getByRole('button', { name: '测试当前模型' }).click();
-  await options.getByText('支持', { exact: true }).waitFor();
+  await probeModel(options);
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -760,8 +776,7 @@ test('Douyu identifies sparse chat and shows the selected sample independently o
 
 test('generic rule correction validates independent rows and leaves their authors out of live translations', { timeout: 40_000 }, async t => {
   const { context, options, requestLog } = await boot(t);
-  await options.getByRole('button', { name: '测试当前模型' }).click();
-  await options.getByText('支持', { exact: true }).waitFor();
+  await probeModel(options);
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -916,8 +931,7 @@ test('generic rules isolate nested lists and extract marked or inline bodies wit
 test('vision can compare distinct body candidates from the same list', { timeout: 35_000 }, async t => {
   const { context, options, requestLog, local } = await boot(t);
   await options.locator('#model').fill('test-paired-body');
-  await options.getByRole('button', { name: '测试当前模型' }).click();
-  await options.getByText('支持', { exact: true }).waitFor();
+  await probeModel(options);
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -944,8 +958,7 @@ test('vision can compare distinct body candidates from the same list', { timeout
 
 test('the vision model sees bounded candidate samples while automatic detection displays progress', { timeout: 45_000 }, async t => {
   const { context, options, requestLog, origin, local } = await boot(t);
-  await options.getByRole('button', { name: '测试当前模型' }).click();
-  await options.getByText('支持', { exact: true }).waitFor();
+  await probeModel(options);
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -1013,8 +1026,7 @@ test('rooms on one site reuse a verified local rule and suggest a different layo
 test('vision can distinguish two editor candidates paired with the same message list', { timeout: 35_000 }, async t => {
   const { context, options, requestLog, local } = await boot(t);
   await options.locator('#model').fill('test-paired-input');
-  await options.getByRole('button', { name: '测试当前模型' }).click();
-  await options.getByText('支持', { exact: true }).waitFor();
+  await probeModel(options);
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -1048,8 +1060,7 @@ test('vision can distinguish two editor candidates paired with the same message 
 test('an endpoint that rejects images disables later visual checks while text translation still works', { timeout: 45_000 }, async t => {
   const { context, options, requestLog } = await boot(t);
   await options.locator('#model').fill('test-runtime-image-rejection');
-  await options.getByRole('button', { name: '测试当前模型' }).click();
-  await options.getByText('支持', { exact: true }).waitFor();
+  await probeModel(options);
   await options.locator('#auto-vision').check();
   await options.getByRole('button', { name: '保存并授权' }).click();
   await options.getByText('已保存。', { exact: true }).waitFor();
@@ -1116,8 +1127,7 @@ test('settings test unsaved model fields and keep the browser language as the de
   assert.equal(await options.getByRole('checkbox').count(), 1);
   assert.equal(await options.locator('#auto-vision').isDisabled(), true);
   await options.locator('#model').fill('unsaved-draft-model');
-  await options.getByRole('button', { name: '测试当前模型' }).click();
-  await options.getByText('连接正常', { exact: true }).waitFor();
+  await probeModel(options);
   assert.equal(await options.locator('#test-image').innerText(), '支持');
   assert.equal(await options.locator('#auto-vision').isEnabled(), true);
   assert.match(await options.locator('#test-latency').innerText(), /^\d+ ms$/);
@@ -1126,8 +1136,7 @@ test('settings test unsaved model fields and keep the browser language as the de
   assert.ok(requestLog.every(body => body.model === 'unsaved-draft-model'));
   assert.equal(JSON.parse(requestLog[0].messages[1].content).targetLanguage, locale);
   await options.locator('#model').fill('test-text-only');
-  await options.getByRole('button', { name: '测试当前模型' }).click();
-  await options.getByText('不支持', { exact: true }).waitFor();
+  await probeModel(options, '不支持');
   assert.equal(await options.locator('#auto-vision').isDisabled(), true);
   assert.equal(await options.locator('#test-connection').innerText(), '连接正常');
   await options.locator('#language').fill('ja');
