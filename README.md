@@ -30,6 +30,10 @@ Chrome 直播弹幕翻译扩展，内置 YouTube、Twitch、Bilibili 和斗鱼�
 
 发布用介绍见 [Chrome 商店文案草稿](docs/chrome-web-store.md)。
 
+## GitHub 自动构建
+
+GitHub 的 **Build Chrome extension** 工作流会在提交到 `main`、向 `main` 发起 PR、推送版本标签或手动触发时运行检查和 Chromium 测试。通过后，在对应运行的 **Artifacts** 中可以下载 `livechat-copilot-<版本>-chrome.zip`。解压后在 Chrome 扩展管理页加载含 `manifest.json` 的目录。
+
 ## 本地安装
 
 需要 Node.js 22.12 或更新版本，以及桌面 Chrome 120 或更新版本。
