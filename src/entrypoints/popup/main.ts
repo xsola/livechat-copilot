@@ -22,6 +22,7 @@ const scopeHelp = document.getElementById('scope-help')!;
 const status = document.querySelector<HTMLParagraphElement>('#status')!;
 const actions = ['detect', 'pick'] as const;
 const actionButtons = actions.map(id => document.querySelector<HTMLButtonElement>('#' + id)!);
+const assistant = document.querySelector<HTMLButtonElement>('#assistant')!;
 let tabId: number;
 let site: SiteState;
 const scopeNames: Record<TranslationScope, string> = { room: message('roomScope'), site: message('siteScope') };
@@ -115,6 +116,7 @@ void run(async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id === undefined) throw new Error(message('openStreamFirst'));
   tabId = tab.id;
+  assistant.disabled = false;
   site = await send('site', tabId);
   siteLabel.textContent = new URL(site.origin).hostname;
   for (const key of ['room', 'site'] as const) {
@@ -136,6 +138,13 @@ void run(async () => {
     button.disabled = false;
     button.addEventListener('click', () => { void run(() => command(action)); });
   }
+});
+
+assistant.addEventListener('click', () => {
+  // Chrome requires this call to run directly from the toolbar gesture.
+  void chrome.sidePanel.open({ tabId }).then(() => window.close(), error => {
+    status.textContent = error instanceof Error ? error.message : message('genericError');
+  });
 });
 
 scope.addEventListener('change', () => {

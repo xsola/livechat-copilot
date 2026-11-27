@@ -75,9 +75,10 @@ export class RoomLanguage {
 
   context() {
     const current = this.identity();
-    const { title, streamer, category } = this.resolvedProfile ?? {};
+    const { title, streamer, category } = this.cached?.profile ?? this.resolvedProfile ?? {};
     return {
       key: current.key,
+      hint: current.languageHint,
       title: current.profile.title ?? title ?? null,
       streamer: current.profile.streamer ?? streamer ?? null,
       category: current.profile.category ?? category ?? null,

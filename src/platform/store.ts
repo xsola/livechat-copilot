@@ -4,10 +4,13 @@ import type { CommunityRules } from '../rules/resolver';
 import type { DailyUsage } from '../usage/usage';
 import type { PromptOverrides } from '../models/prompts';
 import type { TranslationScope } from './translation-scope';
+import type { ComposerBinding } from './assistant';
+import type { RoomProfile } from '../models/tasks';
 
 export interface RoomPreference {
   language: string | null;
   source: 'inferred' | 'user';
+  profile?: RoomProfile;
 }
 
 export interface State {
@@ -21,6 +24,7 @@ export interface State {
   selectedLocalRules: Record<string, string>;
   community: CommunityRules;
   roomPreferences: Record<string, RoomPreference>;
+  composerBindings: Record<string, ComposerBinding>;
   usage: DailyUsage[];
   rejectedVisionModel: string | null;
   sitePrompts: Record<string, PromptOverrides>;
@@ -37,6 +41,7 @@ const initial: State = {
   selectedLocalRules: {},
   community: { active: [], staged: [], rejected: {} },
   roomPreferences: {},
+  composerBindings: {},
   usage: [],
   rejectedVisionModel: null,
   sitePrompts: {},

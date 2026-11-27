@@ -6,6 +6,7 @@ import type { RoomPreference } from './store';
 import type { ChatLocation, ModelProbe, RoomProfile, TranslationItem, VisionAdvice } from '../models/tasks';
 import { promptTasks, type PromptTask } from '../models/prompts';
 import { scopeType, type ScopeOption, type TranslationScope } from './translation-scope';
+import { assistantPage, assistantTask, composerBinding, type AssistantPageResult, type AssistantTaskResult, type ComposerBinding } from './assistant';
 
 const id = z.string().min(1).max(100);
 const roomKey = z.string().min(1).max(300);
@@ -53,6 +54,10 @@ const payloads = {
     tabId: z.number().int().nonnegative(),
     action: z.enum(['ping', 'pick', 'detect', 'room', 'initial-review']),
   }),
+  assistantPage,
+  assistantTask,
+  getComposer: roomKey,
+  saveComposer: z.object({ key: roomKey, binding: composerBinding.nullable() }),
   setTranslateEmoji: z.boolean(),
   setSkipReadingLanguage: z.boolean(),
   setTargetLanguage: settingsSchema.shape.readingLanguage,
@@ -128,6 +133,10 @@ interface Results {
   setRuleSelection: SiteState;
   site: SiteState;
   pageCommand: boolean;
+  assistantPage: AssistantPageResult;
+  assistantTask: AssistantTaskResult;
+  getComposer: ComposerBinding | null;
+  saveComposer: void;
   setTranslateEmoji: void;
   setSkipReadingLanguage: void;
   setTargetLanguage: string;

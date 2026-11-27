@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const pageCounter = z.enum([
   'sessions', 'rendered', 'expired', 'cached', 'local', 'community', 'builtin', 'automatic', 'manualPicker',
 ]);
-export const modelTask = z.enum(['translation', 'vision', 'connection', 'roomProfile', 'agent']);
+export const modelTask = z.enum(['translation', 'vision', 'connection', 'roomProfile', 'agent', 'composer']);
 export type ModelTask = z.infer<typeof modelTask>;
 export type PageCounter = z.infer<typeof pageCounter>;
 

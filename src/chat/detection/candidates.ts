@@ -140,9 +140,9 @@ export function completeCandidateRule(document: Document, region: Element, rule:
   return rankComposers(document, region, rule)[0]?.rule ?? rule;
 }
 
-function rankComposers(document: Document, region: Element, rule: ChatRule) {
+export function rankComposers(document: Document, region: Element, rule: ChatRule) {
   const seen = new Set<Element>();
-  const ranked: Array<{ rule: ChatRule; score: number }> = [];
+  const ranked: Array<{ rule: ChatRule; score: number; corroborated: boolean }> = [];
   const bounds = region.getBoundingClientRect();
   for (let parent = region.parentElement, depth = 0; parent && parent !== document.body && depth < 4;
     parent = parent.parentElement, depth++) {
@@ -167,7 +167,8 @@ function rankComposers(document: Document, region: Element, rule: ChatRule) {
       if (!composer || composer.length > 500) continue;
       const sendButton = send ? selectorPath(document, send) : undefined;
       const score = 4 - depth + (below ? 5 : 0) + (named ? 4 : 0) + (sendButton ? 2 : 0);
-      ranked.push({ rule: { ...rule, composer, sendButton: sendButton && sendButton.length <= 500 ? sendButton : undefined }, score });
+      ranked.push({ rule: { ...rule, composer, sendButton: sendButton && sendButton.length <= 500 ? sendButton : undefined },
+        score, corroborated: below ? named || Boolean(sendButton) : named && Boolean(sendButton) });
     }
   }
   return ranked.sort((a, b) => b.score - a.score);

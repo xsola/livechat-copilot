@@ -1,0 +1,29 @@
+.assistant { max-width: 580px; margin: auto; padding: 16px; }
+.assistant .brand { align-items: flex-start; margin-bottom: 12px; }
+.assistant .brand p { margin: 0; overflow-wrap: anywhere; }
+.assistant h1 { font-size: 20px; }
+.assistant p { overflow-wrap: anywhere; }
+.assistant p:empty, .assistant [hidden] { display: none; }
+.composer-bar { border-block: 1px solid light-dark(#d3ddeb, #445269); padding: 8px 0; }
+.composer-bar #composer-status { margin: 0 0 6px; font-weight: 600; }
+.task-selector { margin-block: 14px 8px; }
+.task-selector button[aria-pressed=true] {
+  background: light-dark(#e6efff, #273c61);
+  border-color: light-dark(#3763a5, #799ada);
+  font-weight: 600;
+}
+.assistant .secondary { font-size: .9rem; }
+.field-header { display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+#task-form { display: flex; flex-direction: column; gap: 6px; }
+#task-form > button { align-self: flex-start; }
+#task-form > label { margin: 0; }
+#task-status:not(:empty), #picker-status:not(:empty) {
+  border-inline-start: 3px solid light-dark(#3763a5, #90ade4);
+  padding-inline-start: 8px;
+}
+.assistant section { padding: 12px; }
+.comparison, #summary { white-space: pre-wrap; }
+#evidence { padding-inline-start: 20px; }
+#evidence details { margin-block: 5px 10px; }
+#evidence summary { cursor: pointer; color: light-dark(#4a5d79,#bac6d9); }
+#evidence blockquote { margin: 6px 0; padding-inline-start: 8px; border-inline-start: 2px solid #8296b4; }

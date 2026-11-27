@@ -153,7 +153,7 @@ async function showUsage() {
     ' · 自动识别 ' + (page.automatic ?? 0) + ' · 手动选区 ' + (page.manualPicker ?? 0);
   view.append(summary, rules);
   const names: Record<ModelTask, string> = {
-    translation: '弹幕翻译', connection: '连接测试', vision: '图像复核', roomProfile: '房间信息', agent: 'Agent',
+    translation: '弹幕翻译', connection: '连接测试', vision: '图像复核', roomProfile: '房间信息', agent: 'Agent', composer: '草稿翻译',
   };
   for (const key of Object.keys(models) as ModelTask[]) {
     const row = models[key]!;

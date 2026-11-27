@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LiveChat Copilot</title>
+</head>
+<body>
+  <main class="assistant">
+    <header class="brand">
+      <img src="/icons/logo.svg" width="36" height="36" alt="">
+      <div><h1 data-i18n="assistantTitle">Chat assistant</h1><p id="room" class="secondary"></p></div>
+    </header>
+    <div id="connection" aria-live="polite" class="actions">
+      <p id="connection-status"></p>
+      <button id="connect" type="button" data-i18n="assistantConnect" hidden>Allow this site</button>
+      <button id="retry" type="button" data-i18n="assistantRefresh" hidden>Check again</button>
+    </div>
+    <div id="workspace" hidden>
+      <div class="composer-bar">
+        <p id="composer-status" aria-live="polite"></p>
+        <div class="actions">
+          <button id="show-composer" type="button" data-i18n="assistantShowEditor">Show input box</button>
+          <button id="re-detect" type="button" data-i18n="assistantDetectEditor">Check for input box</button>
+          <button id="pick-composer" type="button" data-i18n="assistantPickEditor">Select input box</button>
+          <button id="reset-composer" type="button" data-i18n="assistantResetEditor" hidden>Use automatic detection</button>
+          <button id="cancel-pick" type="button" data-i18n="assistantCancel" hidden>Cancel</button>
+          <button id="undo" type="button" data-i18n="assistantUndo" hidden>Undo fill</button>
+        </div>
+        <p id="picker-status" role="status"></p>
+      </div>
+      <div class="task-selector actions" id="tasks">
+        <button type="button" data-mode="translate" aria-pressed="true" data-i18n="assistantTranslate">Translate draft</button>
+        <button type="button" data-mode="draft" aria-pressed="false" data-i18n="assistantDraft">Write reply</button>
+        <button type="button" data-mode="analysis" aria-pressed="false" data-i18n="assistantAnalysis">Analyze chat</button>
+      </div>
+      <form id="task-form">
+        <div id="language-controls">
+          <label><span data-i18n="assistantLanguage">Reply language</span>
+            <input id="reply-language" maxlength="80" spellcheck="false" autocomplete="off" aria-describedby="language-note">
+          </label>
+          <div class="actions">
+            <button id="save-language" type="button" data-i18n="assistantSaveLanguage">Remember for this room</button>
+            <button id="infer-language" type="button" data-i18n="assistantInferLanguage">Suggest from chat</button>
+          </div>
+          <p id="language-note" class="secondary"></p>
+        </div>
+        <label id="analysis-controls" hidden><span data-i18n="assistantAnalysisTask">What to analyze</span>
+          <select id="analysis-mode">
+            <option value="topics" data-i18n="assistantTopics">What are people discussing?</option>
+            <option value="sentiment" data-i18n="assistantSentiment">How has the mood changed?</option>
+            <option value="question" data-i18n="assistantQuestion">Ask a question</option>
+          </select>
+        </label>
+        <div id="source-controls">
+          <div class="field-header">
+            <label for="source" id="source-label"></label>
+            <button id="read-draft" type="button" data-i18n="assistantReadDraft">Read from input box</button>
+          </div>
+          <textarea id="source" rows="3" dir="auto" aria-describedby="source-note"></textarea>
+          <p id="source-note" class="secondary"></p>
+        </div>
+        <label id="tone-controls" hidden><span data-i18n="assistantTone">Tone</span>
+          <select id="tone">
+            <option value="casual" data-i18n="assistantCasual">Conversational</option>
+            <option value="polite" data-i18n="assistantPolite">Polite</option>
+          </select>
+        </label>
+        <button id="run-task" type="submit" class="primary"></button>
+        <p id="privacy-note" class="secondary"></p>
+      </form>
+      <p id="task-status" role="status"></p>
+      <section id="preview" aria-labelledby="preview-heading" hidden>
+        <h2 id="preview-heading" data-i18n="assistantPreview">Preview</h2>
+        <p id="preview-label" class="secondary"></p>
+        <label><span id="result-label"></span><textarea id="result" rows="3" maxlength="3000" dir="auto"></textarea></label>
+        <p id="comparison-label" class="secondary"></p>
+        <p id="comparison" class="comparison" dir="auto"></p>
+        <p id="edited-note" class="secondary" data-i18n="assistantEdited" hidden>The comparison is for the original generated draft.</p>
+        <div class="actions">
+          <button id="apply" type="button" class="primary"></button>
+          <button id="copy" type="button" data-i18n="assistantCopy">Copy text</button>
+          <button id="recheck" type="button" data-i18n="assistantRecheck" hidden>Check current input</button>
+        </div>
+        <p id="apply-note" class="secondary"></p>
+      </section>
+      <section id="analysis-result" aria-labelledby="analysis-heading" hidden>
+        <h2 id="analysis-heading" data-i18n="assistantAnalysisResult">Chat analysis</h2>
+        <p id="coverage" class="secondary"></p>
+        <p id="summary" dir="auto"></p>
+        <ul id="evidence"></ul>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

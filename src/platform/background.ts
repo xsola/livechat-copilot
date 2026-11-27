@@ -12,12 +12,18 @@ import { captureCandidate } from './capture';
 import { parseCommand, type PromptContext, type SiteState } from './messages';
 import { effectiveScope, scopeOptions, type TranslationScope } from './translation-scope';
 import { alreadyInReadingLanguage } from './reading-language';
+import type { AgentContext } from '../agent/context';
+import { generateDraft } from '../agent/tasks/draft';
+import { analyzeChat } from '../agent/tasks/analysis';
+import { translateDraft } from '../translation/draft';
+import type { AssistantOperation, AssistantPageInfo, AssistantPageResult, AssistantTask, AssistantTaskResult } from './assistant';
 
 type Command = NonNullable<ReturnType<typeof parseCommand>>;
 const uiOnly = new Set<Command['kind']>([
   'getSettings', 'saveSettings', 'saveModelSettings', 'saveReadingSettings', 'probeModel', 'syncRegistry', 'usageSummary',
   'clearUsage', 'removeRule', 'site', 'setSite', 'attach', 'pageCommand', 'setTranslateEmoji', 'setSkipReadingLanguage',
   'setPreferredScope', 'setTargetLanguage', 'setRuleSelection', 'promptContext', 'savePrompt',
+  'assistantPage', 'assistantTask',
 ]);
 const registryAlarm = 'refresh-community-rules';
 const checksInFlight = new Set<string>();
@@ -128,7 +134,7 @@ async function captureForReview(tab: chrome.tabs.Tab, frameId: number | undefine
   }
 }
 
-async function routePageCommand(tabId: number, action: string) {
+async function findPageFrame(tabId: number) {
   const frames = await chrome.scripting.executeScript({
     target: { tabId, allFrames: true }, func: () => true,
   }).then(results => results.map(result => result.frameId)).catch(() => [0]);
@@ -136,9 +142,83 @@ async function routePageCommand(tabId: number, action: string) {
     frameId,
     rank: Number(await chrome.tabs.sendMessage(tabId, { pageAction: 'rank' }, { frameId }).catch(() => 0)),
   })));
-  const target = available.filter(frame => frame.rank > 0).sort((a, b) => b.rank - a.rank)[0];
+  return available.filter(frame => frame.rank > 0).sort((a, b) => b.rank - a.rank)[0];
+}
+
+async function routePageCommand(tabId: number, action: string) {
+  const target = await findPageFrame(tabId);
   return Boolean(target && (action === 'ping' || await chrome.tabs.sendMessage(tabId, { pageAction: action },
     { frameId: target.frameId }).catch(() => false)));
+}
+
+type PageAssistantReply =
+  | { kind: 'page'; page: AssistantPageInfo }
+  | { kind: 'context'; context: AgentContext & { room: { hint?: string } }; roomKey: string; pageToken: string }
+  | { kind: 'picked' | 'conflict' };
+
+async function askPage(tabId: number, frameId: number, operation: AssistantOperation): Promise<PageAssistantReply | undefined> {
+  return chrome.tabs.sendMessage(tabId, { assistant: operation }, { frameId }).catch(() => undefined);
+}
+
+async function assistantPage(tabId: number, operation: AssistantOperation, frameId?: number): Promise<AssistantPageResult> {
+  const tab = await chrome.tabs.get(tabId);
+  if (!tab.active && operation.action !== 'cancelPick') return { kind: 'conflict' };
+  const page = webUrl(tab.url);
+  if (operation.action === 'context') throw new Error('That operation is available only to the model task router.');
+  if (operation.action === 'inspect' && frameId === undefined) {
+    if (!await chrome.permissions.contains({ origins: [hostPattern(page)] })) return { kind: 'permission', origin: page.origin };
+    let frame = await findPageFrame(tabId);
+    if (!frame) {
+      await attach(tabId, page);
+      frame = await findPageFrame(tabId);
+    }
+    frameId = frame?.frameId;
+  }
+  if (frameId === undefined) return { kind: 'missing' };
+  const result = await askPage(tabId, frameId, operation);
+  if (result?.kind === 'page') return { ...result, frameId };
+  if (result?.kind === 'picked') return { kind: 'picked' };
+  return { kind: 'conflict' };
+}
+
+async function runAssistantTask(input: AssistantTask): Promise<AssistantTaskResult> {
+  const tab = await chrome.tabs.get(input.tabId);
+  if (!tab.active) throw new Error('assistantPageChanged');
+  const page = webUrl(tab.url);
+  const key = 'assistant:' + input.tabId;
+  if (checksInFlight.has(key)) throw new Error('assistantAlreadyRunning');
+  checksInFlight.add(key);
+  try {
+    const state = await readState();
+    if (input.task === 'resolveLanguage') {
+      const settings = await authorizedModel(pageSettings(state, page.origin));
+      return { kind: 'language', language: await tasks.resolveRoomLanguage(settings, input.text) };
+    }
+    const result = await askPage(input.tabId, input.frameId, { action: 'context', pageToken: input.pageToken });
+    if (result?.kind !== 'context' || result.pageToken !== input.pageToken || !result.roomKey.startsWith(page.origin + '|')) {
+      throw new Error('assistantPageChanged');
+    }
+    const settings = await authorizedModel(pageSettings(state, page.origin));
+    if (input.task === 'translate') {
+      return { kind: 'translate', translation: await translateDraft(tasks, settings, input.text, input.language) };
+    }
+    if (input.task === 'draft') {
+      const draft = await generateDraft(tasks, settings, result.context, input.text, input.language, input.tone);
+      return { kind: 'draft', draft, messageCount: Math.min(35, result.context.messages.length) };
+    }
+    if (input.task === 'analysis') return analyzeChat(tasks, settings, result.context, input.mode, input.question);
+    const existing = state.roomPreferences[result.roomKey]?.language;
+    if (existing) return { kind: 'language', language: existing };
+    const lines = [...new Set(result.context.messages.map(item => item.text.trim().slice(0, 180))
+      .filter(line => /\p{L}/u.test(line)))].slice(-32);
+    if (lines.length < 5) throw new Error('notEnoughChat');
+    const { title, streamer, category, hint } = result.context.room;
+    const profile = await tasks.roomProfile(settings, { title, streamer, category, language: hint }, lines);
+    const preference = await saveRoom(result.roomKey, { language: profile.language, source: 'inferred', profile }, true);
+    return { kind: 'language', language: preference?.language ?? null };
+  } finally {
+    checksInFlight.delete(key);
+  }
 }
 
 async function attach(tabId: number, page: URL) {
@@ -166,7 +246,7 @@ async function attach(tabId: number, page: URL) {
 
 async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Promise<unknown> {
   if (uiOnly.has(cmd.kind)) {
-    const allowed = ['popup.html', 'options.html'].some(path => sender.url === chrome.runtime.getURL(path) ||
+    const allowed = ['popup.html', 'options.html', 'sidepanel.html'].some(path => sender.url === chrome.runtime.getURL(path) ||
       sender.url?.startsWith(chrome.runtime.getURL(path) + '?'));
     if (!allowed) throw new Error('This action is only available in extension settings or the toolbar.');
     return dispatchUi(cmd);
@@ -279,6 +359,19 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
     case 'getRoom':
       requireRoom(cmd.payload);
       return state.roomPreferences[cmd.payload] ?? null;
+    case 'getComposer':
+      requireRoom(cmd.payload);
+      return state.composerBindings[cmd.payload] ?? null;
+    case 'saveComposer': {
+      const { key, binding } = cmd.payload;
+      requireRoom(key);
+      if (binding && binding.path !== frame.pathname) throw new Error('The input selection has expired.');
+      return editState(latest => {
+        const bindings = Object.entries(latest.composerBindings).filter(([id]) => id !== key);
+        if (binding) bindings.push([key, binding]);
+        return { changes: { composerBindings: Object.fromEntries(bindings.slice(-500)) }, result: undefined };
+      });
+    }
     case 'resolveRoomLanguage':
       return tasks.resolveRoomLanguage(await authorizedModel(state.settings), cmd.payload);
     case 'setRoom': {
@@ -318,12 +411,13 @@ async function dispatch(cmd: Command, sender: chrome.runtime.MessageSender): Pro
 
 function saveRoom(key: string, value: RoomPreference | null, ifMissing = false) {
   return editState(state => {
-    if (ifMissing && state.roomPreferences[key]) {
-      return { changes: {}, result: state.roomPreferences[key] };
+    const existing = state.roomPreferences[key];
+    if (ifMissing && existing?.language) {
+      return { changes: {}, result: existing };
     }
     const roomPreferences = { ...state.roomPreferences };
     delete roomPreferences[key];
-    if (value) roomPreferences[key] = value;
+    if (value) roomPreferences[key] = { ...value, profile: value.profile ?? existing?.profile };
     return { changes: { roomPreferences: Object.fromEntries(Object.entries(roomPreferences).slice(-500)) }, result: value };
   });
 }
@@ -339,6 +433,10 @@ async function dispatchUi(cmd: Command): Promise<unknown> {
     }
     case 'pageCommand':
       return routePageCommand(cmd.payload.tabId, cmd.payload.action);
+    case 'assistantPage':
+      return assistantPage(cmd.payload.tabId, cmd.payload.operation, cmd.payload.frameId);
+    case 'assistantTask':
+      return runAssistantTask(cmd.payload);
     case 'setPreferredScope': {
       const { tabId, origin, scope } = cmd.payload;
       if (webUrl((await chrome.tabs.get(tabId)).url).origin !== origin) {

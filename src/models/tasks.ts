@@ -34,10 +34,18 @@ export const draftOutput = z.object({
   draft: z.string().trim().min(1).max(600),
   backTranslation: z.string().trim().min(1).max(600),
 });
+const analysisOutput = z.object({
+  summary: z.string().trim().min(1).max(1800),
+  points: z.array(z.object({
+    text: z.string().trim().min(1).max(350),
+    evidence: z.array(z.number().int().positive()).min(1).max(4),
+  })).max(5),
+});
 
 export type VisionAdvice = z.infer<typeof visionOutput>;
 export type RoomProfile = z.infer<typeof roomOutput>;
 export type ReplyDraft = z.infer<typeof draftOutput>;
+export type ChatAnalysis = z.infer<typeof analysisOutput>;
 export interface TranslationItem { id: string; text: string }
 export interface ModelProbe {
   translationMs: number | null;
@@ -102,6 +110,11 @@ export function createTasks(meter: Meter, request = fetch) {
 
   return {
     translate,
+    translateComposer(settings: ModelSettings, text: string, targetLanguage: string) {
+      return call('composer', settings, taskInstructions('composer', settings),
+      { draft: text, targetLanguage },
+      result => requireResult(z.object({ translation: z.string().trim().min(1).max(3000) }), result).translation, 1200);
+    },
     vision(settings: ModelSettings, image: string, sample: object) {
       return call('vision', settings,
         taskInstructions('vision', settings),
@@ -142,13 +155,24 @@ export function createTasks(meter: Meter, request = fetch) {
         { languageInput }, output => requireResult(z.object({ language: languageCode.nullable() }), output), 60);
       return (result.language && normalizeLanguage(result.language)) || null;
     },
-    draft(settings: ModelSettings, context: object, intent: string, replyLanguage: string) {
+    draft(settings: ModelSettings, context: object, intent: string, replyLanguage: string, tone = 'casual') {
       return call('agent', settings,
-        localizedPrompt(settings.uiLanguage,
-          'Write a short reply for the live chat based on the user intent and available context. Return {"draft":"reply in replyLanguage","backTranslation":"meaning in readingLanguage"}.',
-          '根据用户意图和直播间上下文写一条简短的弹幕回复。返回 {"draft":"用 replyLanguage 写的回复","backTranslation":"用 readingLanguage 写的对照译文"}。'),
-        { readingLanguage: settings.readingLanguage, replyLanguage, context, intent },
+        taskInstructions('draft', settings),
+        { readingLanguage: settings.readingLanguage, replyLanguage, context, intent, tone },
         result => requireResult(draftOutput, result), 450);
+    },
+    analyze(
+      settings: ModelSettings, context: { messages: { id: number }[] }, mode: 'topics' | 'sentiment' | 'question', question: string,
+    ) {
+      return call('agent', settings, taskInstructions('analysis', settings),
+      { readingLanguage: settings.readingLanguage, context, mode, question }, value => {
+        const output = requireResult(analysisOutput, value);
+        const ids = new Set(context.messages.map(message => message.id));
+        if (output.points.some(point => point.evidence.some(id => !ids.has(id)))) {
+          throw new ModelError('Model returned unknown chat evidence IDs.');
+        }
+        return output;
+      }, 1100);
     },
     async probe(settings: ModelSettings): Promise<ModelProbe> {
       const start = performance.now();

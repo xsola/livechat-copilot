@@ -11,6 +11,8 @@ import { isTwitch, twitchChannel } from './twitch';
 import { Picker } from './detection/picker';
 import { PagePanel } from './page-panel';
 import { ChatSession } from './session';
+import { AssistantPage } from './composer/page';
+import { assistantOperation } from '../platform/assistant';
 
 function localId(rule: ChatRule) {
   let hash = 2166136261;
@@ -49,6 +51,7 @@ export function startLiveChat(signal: AbortSignal) {
   let panel: PagePanel | undefined;
   let picker: Picker | undefined;
   let session: ChatSession | undefined;
+  let assistant: AssistantPage | undefined;
   let sessionSignature = '';
   let lastError = '';
   let counted = false;
@@ -101,12 +104,14 @@ export function startLiveChat(signal: AbortSignal) {
   function reset() {
     generation++;
     session?.close();
+    assistant?.close();
     picker?.close();
     panel?.host.remove();
     stopTracking();
     panel = undefined;
     picker = undefined;
     session = undefined;
+    assistant = undefined;
     sessionSignature = '';
     snapshot = undefined;
     language = undefined;
@@ -372,8 +377,22 @@ export function startLiveChat(signal: AbortSignal) {
     }
   }
 
-  const listener = (message: { pageAction?: string }, sender: chrome.runtime.MessageSender, respond: (value: boolean | number) => void) => {
-    if (sender.id !== chrome.runtime.id || typeof message?.pageAction !== 'string' || !synchronize()) return;
+  const listener = (message: { pageAction?: string; assistant?: unknown }, sender: chrome.runtime.MessageSender, respond: (value: unknown) => void) => {
+    if (sender.id !== chrome.runtime.id || !message || !synchronize()) return;
+    if ('assistant' in message) {
+      const parsed = assistantOperation.safeParse(message.assistant);
+      if (!parsed.success || !language) return;
+      const current = generation;
+      assistant ??= new AssistantPage(language, () => synchronize() && generation === current, () => session);
+      const pageAssistant = assistant;
+      if (parsed.data.action === 'pick') picker?.close();
+      void refresh().then(() => {
+        if (generation !== current) return { kind: 'conflict' };
+        return pageAssistant.handle(parsed.data);
+      }).then(respond, () => respond({ kind: 'conflict' }));
+      return true;
+    }
+    if (typeof message.pageAction !== 'string') return;
     if (message.pageAction === 'rank') {
       respond((session ? 100 : 0) + (frame.pathname === '/live_chat' ? 20 : 0) + (window === window.top ? 2 : 1));
       return;
@@ -384,7 +403,7 @@ export function startLiveChat(signal: AbortSignal) {
   chrome.runtime.onMessage.addListener(listener);
   const timer = setInterval(tick, 850);
   window.navigation?.addEventListener('currententrychange', tick, { signal });
-  window.addEventListener('pagehide', () => { picker?.close(); session?.close(); session = undefined; void meter.flush(); }, { signal });
+  window.addEventListener('pagehide', () => { picker?.close(); assistant?.close(); session?.close(); session = undefined; void meter.flush(); }, { signal });
   signal.addEventListener('abort', () => {
     clearInterval(timer);
     chrome.runtime.onMessage.removeListener(listener);

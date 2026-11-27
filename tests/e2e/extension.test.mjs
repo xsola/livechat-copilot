@@ -29,7 +29,9 @@ async function boot(t, locale = 'zh-CN') {
       return;
     }
     const items = command.items ?? [];
-    if (items.some(item => item.text === 'Slow original')) await new Promise(resolve => setTimeout(resolve, 900));
+    if (command.draft === 'Slow original' || items.some(item => item.text === 'Slow original')) {
+      await new Promise(resolve => setTimeout(resolve, 900));
+    }
     if (command.candidates || (command.sample && value.model === 'test-review-mixed')) {
       await new Promise(resolve => setTimeout(resolve, 650));
     }
@@ -44,6 +46,9 @@ async function boot(t, locale = 'zh-CN') {
         composerVerdict: command.sample.editorImage ? 'likely-composer' : 'unlikely-composer' }
       : items.length ? { translations: items.map(({ id, text }) => ({ id, text: '译：' + text })) }
       : command.languageInput ? { language: 'ja' }
+      : command.draft ? { translation: '訳: ' + command.draft }
+      : command.intent ? { draft: 'すごい逆転！', backTranslation: '好精彩的逆转！' }
+      : command.mode ? { summary: '大家在讨论最后一波。', points: [{ text: '有人称赞逆转。', evidence: [1] }] }
       : command.check ? { ok: true } : { language: 'en', title: null, streamer: null, category: null };
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
       choices: [{ message: { content: JSON.stringify(output) } }],
@@ -133,6 +138,8 @@ test('the visible dist directory loads without modifying the manifest', { timeou
   const manifest = JSON.parse(await readFile(path.join(unpacked, 'manifest.json'), 'utf8'));
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.default_locale, 'en');
+  assert.equal(manifest.side_panel.default_path, 'sidepanel.html');
+  assert.ok(manifest.permissions.includes('sidePanel'));
   assert.equal(manifest.host_permissions.includes('<all_urls>'), false);
   assert.equal(manifest.action.default_icon['16'], 'icons/icon-16.png');
   assert.equal((await readFile(path.join(unpacked, manifest.icons['128']))).readUInt32BE(16), 128);
@@ -184,6 +191,115 @@ test('YouTube restricted input is recognized without inferring a send-area misma
   assert.equal(payloads()[1].editorImage, true);
   assert.equal(payloads()[1].sendImage, true);
 });
+
+test('YouTube assistant previews, fills and restores native drafts, handles stale input and runs on-demand Agent tasks',
+  { timeout: 45_000 }, async t => {
+    const { context, options, origin, requestLog } = await boot(t);
+    const live = await context.newPage();
+    await live.goto('https://www.youtube.com/watch?v=assistant');
+    const chat = live.frameLocator('#chatframe');
+    await chat.locator('body').evaluate(body => {
+      const area = document.createElement('yt-live-chat-message-input-renderer');
+      area.innerHTML = '<div id="input" contenteditable="true" style="min-height:28px">Good game!</div>' +
+        '<div id="send-button"><button>Send</button></div>';
+      body.querySelector('yt-live-chat-item-list-renderer').after(area);
+      body.dataset.sent = '0';
+      area.querySelector('button').addEventListener('click', () => { body.dataset.sent = '1'; });
+      const list = body.querySelector('#items');
+      for (const text of ['That comeback!', 'A close final', 'Great play at the end', 'What a tournament']) {
+        const row = document.createElement('yt-live-chat-text-message-renderer');
+        row.innerHTML = '<span id="author-name">Test metadata</span><span id="message"></span>';
+        row.querySelector('#message').textContent = text;
+        list.append(row);
+      }
+    });
+    const panel = await context.newPage();
+    await panel.setViewportSize({ width: 340, height: 780 });
+    await panel.goto(origin + '/sidepanel.html');
+    await live.bringToFront();
+    await panel.getByText('已找到直播输入框', { exact: true }).waitFor();
+    await panel.locator('#show-composer').click();
+    await chat.locator('[data-livechat-copilot="composer"]').waitFor();
+    await panel.locator('#read-draft').click();
+    await until(async () => await panel.locator('#source').inputValue() === 'Good game!');
+    await panel.locator('#reply-language').fill('jp');
+    await panel.locator('#save-language').click();
+    await panel.locator('#language-note').getByText('日语', { exact: false }).waitFor();
+    await panel.locator('#run-task').click();
+    await until(async () => await panel.locator('#result').inputValue() === '訳: Good game!');
+    assert.equal(await panel.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.equal(await chat.locator('#input').innerText(), 'Good game!');
+    await panel.locator('#apply').click();
+    await until(async () => await chat.locator('#input').innerText() === '訳: Good game!');
+    assert.equal(await chat.locator('body').getAttribute('data-sent'), '0');
+    await panel.locator('#undo').click();
+    await until(async () => await chat.locator('#input').innerText() === 'Good game!');
+
+    await chat.locator('#input').fill('Slow original');
+    await panel.locator('#read-draft').click();
+    await until(async () => await panel.locator('#source').inputValue() === 'Slow original');
+    await panel.locator('#run-task').click();
+    await until(() => requestLog.some(body => JSON.parse(body.messages[1].content).draft === 'Slow original'));
+    await chat.locator('#input').fill('I edited my draft');
+    await until(async () => await panel.locator('#result').inputValue() === '訳: Slow original');
+    await panel.locator('#apply').click();
+    await panel.getByText('输入内容已变化', { exact: false }).waitFor();
+    assert.equal(await chat.locator('#input').innerText(), 'I edited my draft');
+    assert.equal(await panel.locator('#apply').isDisabled(), true);
+
+    await panel.locator('#pick-composer').click();
+    await panel.getByText('请到直播页面点击实际输入框', { exact: false }).waitFor();
+    await chat.locator('#chat-editor').click();
+    await panel.getByText('正在使用你确认的输入框', { exact: true }).waitFor();
+    const saved = await options.evaluate(() => chrome.storage.local.get(['composerBindings', 'localRules']));
+    assert.equal(Object.values(saved.composerBindings)[0].selector, '#chat-editor');
+    assert.equal(saved.localRules?.length ?? 0, 0);
+
+    await panel.locator('[data-mode="draft"]').click();
+    await panel.locator('#source').fill('Praise the comeback');
+    await panel.locator('#tone').selectOption('polite');
+    await panel.locator('#run-task').click();
+    await until(async () => await panel.locator('#result').inputValue() === 'すごい逆転！');
+    assert.equal(await panel.locator('#comparison').textContent(), '好精彩的逆转！');
+    await panel.locator('#apply').click();
+    await until(async () => await chat.locator('#chat-editor').inputValue() === 'すごい逆転！');
+    await panel.locator('#undo').click();
+    await until(async () => await chat.locator('#chat-editor').inputValue() === '');
+    await panel.locator('[data-mode="analysis"]').click();
+    await panel.locator('#analysis-mode').selectOption('question');
+    await panel.locator('#source').fill('What happened at the end?');
+    await panel.locator('#run-task').click();
+    await panel.getByText('大家在讨论最后一波。', { exact: true }).waitFor();
+    await panel.locator('#evidence summary').click();
+    assert.match(await panel.locator('#evidence blockquote').textContent(), /Amazing comeback/);
+    const calls = requestLog.map(body => JSON.parse(body.messages[1].content));
+    const draftCall = calls.find(call => call.intent);
+    assert.equal(draftCall.replyLanguage, 'ja');
+    assert.equal(draftCall.tone, 'polite');
+    assert.match(draftCall.context.recentChat.join(' '), /A close final/);
+    assert.doesNotMatch(JSON.stringify(draftCall), /Test metadata|OriginalAuthor/);
+    assert.equal(calls.find(call => call.draft === 'Good game!').context, undefined);
+    assert.equal(calls.find(call => call.mode === 'question').context.messages.length, 6);
+    await panel.locator('#reset-composer').click();
+    await panel.getByText('已找到直播输入框', { exact: true }).waitFor();
+    const tab = await tabId(options, live.url());
+    const ready = await command(panel, 'assistantPage', { tabId: tab, operation: { action: 'inspect' } });
+    await chat.locator('#input').dispatchEvent('compositionstart');
+    const composing = await command(panel, 'assistantPage', { tabId: tab, frameId: ready.frameId, operation: {
+      action: 'apply', pageToken: ready.page.pageToken, ticket: ready.page.composer.ticket, text: 'During composition',
+    } });
+    assert.equal(composing.kind, 'conflict');
+    assert.equal(await chat.locator('#input').innerText(), 'I edited my draft');
+    await chat.locator('#input').dispatchEvent('compositionend');
+    await chat.locator('#input').evaluate(node => node.setAttribute('aria-readonly', 'true'));
+    const before = await command(panel, 'assistantPage', { tabId: tab, operation: { action: 'inspect' } });
+    assert.equal(before.page.composer.state, 'unavailable');
+    await live.goto('https://www.youtube.com/watch?v=next-room');
+    const stale = await command(panel, 'assistantPage', { tabId: tab, frameId: before.frameId, operation: {
+      action: 'apply', pageToken: before.page.pageToken, ticket: before.page.pageToken, text: 'An old reply',
+    } });
+    assert.equal(stale.kind, 'conflict');
+  });
 
 test('automatic review shows a body warning separately from a successful region match', { timeout: 35_000 }, async t => {
   const { context, options, requestLog } = await boot(t);
