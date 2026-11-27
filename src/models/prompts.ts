@@ -25,8 +25,8 @@ const promptDefaults: Record<PromptTask, [string, string]> = {
     '按用户意图和所选语气写一条简短的直播弹幕。',
   ],
   analysis: [
-    'Summarize the sampled chat for topics, describe changes over sample order for sentiment, or answer the question using the sample.',
-    '根据弹幕样本总结话题、描述随时间变化的情绪，或回答用户提出的弹幕问题。',
+    'Answer the user question using the chat sample. For questions about topics or sentiment changes, use the sample order to support the answer.',
+    '根据弹幕样本回答用户的问题。涉及话题或情绪变化时，结合样本的先后顺序作答。',
   ],
   vision: [
     'Judge whether the cropped region and HTML show a live-chat message list, and whether the samples are message bodies. If an editor image is supplied, also judge whether the cropped controls belong to live chat.',

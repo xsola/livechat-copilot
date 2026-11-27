@@ -9,7 +9,6 @@ const boundTab = tab.extend({ frameId: z.number().int().nonnegative(), pageToken
 const bound = z.object({ pageToken: token });
 const ticket = z.object({ ticket: token });
 const text = z.string().min(1).max(3000).refine(value => Boolean(value.trim()));
-export const analysisModes = ['topics', 'sentiment', 'question'] as const;
 export const composerBinding = z.object({ path: z.string().max(500), selector: z.string().min(1).max(500) });
 export type ComposerBinding = z.infer<typeof composerBinding>;
 
@@ -34,7 +33,6 @@ export const assistantPage = tab.extend({ frameId: z.number().int().nonnegative(
 export const assistantTask = z.discriminatedUnion('task', [
   boundTab.extend({ task: z.literal('translate'), text: text.max(600), language: languageCode }),
   boundTab.extend({ task: z.literal('draft'), text: text.max(500), language: languageCode, tone: z.enum(['casual', 'polite']) }),
-  boundTab.extend({ task: z.literal('analysis'), mode: z.enum(analysisModes), question: z.string().trim().max(500) }),
   tab.extend({ task: z.literal('ask'), question: z.string().trim().min(1).max(500),
     chat: z.object({ frameId: z.number().int().nonnegative(), pageToken: token }).optional() }),
   boundTab.extend({ task: z.literal('inferLanguage') }),

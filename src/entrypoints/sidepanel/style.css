@@ -23,7 +23,6 @@
 }
 .assistant section { padding: 12px; }
 .comparison, #summary, #answer-text { white-space: pre-wrap; }
-#analysis-controls button { border-radius: 16px; }
 #evidence { padding-inline-start: 20px; }
 #evidence details { margin-block: 5px 10px; }
 #evidence summary { cursor: pointer; color: light-dark(#4a5d79,#bac6d9); }

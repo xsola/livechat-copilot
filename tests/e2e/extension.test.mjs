@@ -288,10 +288,7 @@ test('YouTube assistant previews, fills and restores native drafts, handles stal
     assert.equal(calls.find(call => call.draft === 'Good game!').context, undefined);
     assert.equal(calls.find(call => call.mode === 'question').context.messages.length, 6);
     assert.equal(calls.find(call => !call.mode && call.question === 'What happened at the end?').context, undefined);
-    await panel.locator('[data-suggestion="topics"]').click();
-    assert.match(await panel.locator('#source').inputValue(), /刚才在聊什么/);
-    await panel.locator('#run-task').click();
-    await until(() => requestLog.some(({ messages }) => JSON.parse(messages[1].content).mode === 'topics'));
+    assert.equal(await panel.locator('[data-suggestion]').count(), 0);
     await panel.locator('#reset-composer').click();
     await panel.getByText('已找到直播输入框', { exact: true }).waitFor();
     const tab = await tabId(options, live.url());

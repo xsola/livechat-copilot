@@ -5,12 +5,11 @@ import type { AssistantTaskResult } from '../../platform/assistant';
 
 export async function analyzeChat(
   tasks: Pick<ReturnType<typeof createTasks>, 'analyze'>, settings: ModelSettings, context: AgentContext,
-  mode: 'topics' | 'sentiment' | 'question', question: string,
+  question: string,
 ): Promise<AssistantTaskResult> {
   const { from, to, ...sample } = analysisContext(context);
   const messageCount = sample.messages.length;
   if (messageCount < 5) throw new Error('notEnoughChat');
-  if (mode === 'question' && !question) throw new Error('needQuestion');
-  const analysis = await tasks.analyze(settings, sample, mode, question);
+  const analysis = await tasks.analyze(settings, sample, question);
   return { kind: 'analysis', analysis, excerpts: sample.messages.map(item => item.text), messageCount, from, to };
 }

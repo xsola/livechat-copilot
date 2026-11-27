@@ -162,10 +162,10 @@ export function createTasks(meter: Meter, request = fetch) {
         result => requireResult(draftOutput, result), 450);
     },
     analyze(
-      settings: ModelSettings, context: { messages: { id: number }[] }, mode: 'topics' | 'sentiment' | 'question', question: string,
+      settings: ModelSettings, context: { messages: { id: number }[] }, question: string,
     ) {
       return call('agent', settings, taskInstructions('analysis', settings),
-      { readingLanguage: settings.readingLanguage, context, mode, question }, value => {
+      { readingLanguage: settings.readingLanguage, context, mode: 'question', question }, value => {
         const output = requireResult(analysisOutput, value);
         const ids = new Set(context.messages.map(message => message.id));
         if (output.points.some(point => point.evidence.some(id => !ids.has(id)))) {

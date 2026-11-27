@@ -234,7 +234,7 @@ async function runAssistantTask(input: AssistantTask): Promise<AssistantTaskResu
       if (!chat || !page || (await chrome.tabs.get(input.tabId)).url !== page.href) throw new Error('notEnoughChat');
       const result = await askPage(input.tabId, chat.frameId, { action: 'context', pageToken: chat.pageToken });
       if (result?.kind !== 'context' || !result.roomKey.startsWith(page.origin + '|')) throw new Error('notEnoughChat');
-      return analyzeChat(tasks, settings, result.context, 'question', input.question);
+      return analyzeChat(tasks, settings, result.context, input.question);
     }
     if (!page) throw new Error('assistantPageChanged');
     if (input.task === 'resolveLanguage') {
@@ -253,7 +253,6 @@ async function runAssistantTask(input: AssistantTask): Promise<AssistantTaskResu
       const draft = await generateDraft(tasks, settings, result.context, input.text, input.language, input.tone);
       return { kind: 'draft', draft, messageCount: Math.min(35, result.context.messages.length) };
     }
-    if (input.task === 'analysis') return analyzeChat(tasks, settings, result.context, input.mode, input.question);
     const existing = state.roomPreferences[result.roomKey]?.language;
     if (existing) return { kind: 'language', language: existing };
     const lines = [...new Set(result.context.messages.map(item => item.text.trim().slice(0, 180))

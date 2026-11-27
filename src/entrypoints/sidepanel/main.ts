@@ -15,7 +15,6 @@ const output = get<HTMLTextAreaElement>('result');
 const language = get<HTMLInputElement>('reply-language');
 const tone = get<HTMLSelectElement>('tone');
 const modeButtons = document.querySelectorAll<HTMLButtonElement>('#tasks button');
-const suggestions = document.querySelectorAll<HTMLButtonElement>('[data-suggestion]');
 const tabParam = new URLSearchParams(location.search).get('tabId');
 const panelTab = tabParam && /^\d+$/.test(tabParam) ? Number(tabParam) : undefined;
 
@@ -34,7 +33,6 @@ let busy = false;
 let picking = false;
 let selection: string | undefined;
 let selectedEditor: { frameId: number; pageToken: string; status: ComposerPickStatus } | undefined;
-let suggestion: { mode: 'topics' | 'sentiment'; text: string } | undefined;
 let preview: Preview | undefined;
 let sourceGuard: Guard | undefined;
 let sourceWasRead = false;
@@ -61,7 +59,6 @@ function guard(page: AssistantPageInfo): Guard | undefined {
 function updateControls() {
   get('composer-bar').hidden = !active;
   for (const element of modeButtons) element.disabled = busy || !active && element.dataset.mode !== 'analysis';
-  for (const element of suggestions) element.disabled = busy || !active?.chat;
   button('run-task').disabled = busy || picking || currentTab === undefined;
   source.readOnly = busy;
   if (!active) return;
@@ -114,7 +111,6 @@ function renderMode() {
   for (const element of modeButtons) element.setAttribute('aria-pressed', String(element.dataset.mode === mode));
   get('language-controls').hidden = mode === 'analysis';
   get('tone-controls').hidden = mode !== 'draft';
-  get('analysis-controls').hidden = mode !== 'analysis';
   get('source-controls').hidden = false;
   source.maxLength = mode === 'translate' ? 600 : 500;
   status('source-label', mode === 'translate' ? 'assistantSource' : mode === 'draft' ? 'assistantIntent' : 'assistantYourQuestion');
@@ -175,7 +171,6 @@ async function connect(reset = false) {
     sourceGuard = undefined;
     sourceWasRead = false;
     source.value = '';
-    suggestion = undefined;
     clearResults();
     setLanguage(null);
     status('picker-status', '');
@@ -251,7 +246,7 @@ async function task(input: TaskInput) {
     return result;
   }
   const { tabId, frameId, page, chat } = requireActive();
-  if ((input.task === 'analysis' || input.task === 'inferLanguage') && !chat) throw new Error('notEnoughChat');
+  if (input.task === 'inferLanguage' && !chat) throw new Error('notEnoughChat');
   const context = input.task !== 'translate' && chat ? chat : { frameId, pageToken: page.pageToken };
   const result = await send('assistantTask', input.task === 'resolveLanguage'
     ? { ...input, tabId }
@@ -330,21 +325,12 @@ for (const element of modeButtons) element.addEventListener('click', () => {
   if (element.dataset.mode === mode) return;
   mode = element.dataset.mode as Mode;
   source.value = '';
-  suggestion = undefined;
   sourceGuard = undefined;
   sourceWasRead = false;
   clearResults();
   status('task-status', '');
   renderMode();
 });
-for (const element of suggestions) element.addEventListener('click', () => {
-  const mode = element.dataset.suggestion as 'topics' | 'sentiment';
-  const text = message(mode === 'topics' ? 'assistantTopics' : 'assistantSentiment');
-  suggestion = { mode, text };
-  source.value = text;
-  source.focus();
-});
-source.addEventListener('input', () => { if (suggestion?.text !== source.value) suggestion = undefined; });
 language.addEventListener('input', () => { languageDirty = true; });
 output.addEventListener('input', () => {
   if (preview) preview.filled = false;
@@ -362,9 +348,7 @@ get<HTMLFormElement>('task-form').addEventListener('submit', event => {
     if (text.length > maximum) throw new Error('assistantTextTooLong');
     clearResults();
     if (mode === 'analysis') {
-      const result = suggestion && suggestion.text === text
-        ? await task({ task: 'analysis', mode: suggestion.mode, question: '' })
-        : await task({ task: 'ask', question: text.trim() });
+      const result = await task({ task: 'ask', question: text.trim() });
       if (result.kind === 'analysis') showAnalysis(result);
       if (result.kind === 'answer') { get('answer-text').textContent = result.answer; get('answer').hidden = false; }
     } else {
